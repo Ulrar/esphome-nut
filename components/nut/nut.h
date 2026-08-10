@@ -88,6 +88,8 @@ class Nut : public Component {
   bool get_string_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t index,
                               char *buffer, size_t buffer_length);
   const ResolvedVar *find_var_(const char *name) const;
+  const ResolvedVar *find_raw_var_(const char *name) const;
+  const ResolvedVar *charger_status_var_() const;
   void get_var_value_(int client_fd, const std::string &variable) const;
   std::string ups_status_() const;
 
@@ -107,6 +109,11 @@ class Nut : public Component {
   uint8_t *raw_desc_{nullptr};
   size_t raw_desc_len_{0};
   std::vector<InstantCommand> commands_;
+  mutable ResolvedVar charger_status_cache_{.name = "battery.charger.status",
+                                            .format = "%s",
+                                            .convert = 0,
+                                            .item = nullptr,
+                                            .is_string = true};
   volatile int pending_command_{-1};  // index into commands_, -1 = none
   volatile int command_result_{0};    // 0 = idle/ok, 1 = failed
   std::vector<ResolvedVar> vars_;

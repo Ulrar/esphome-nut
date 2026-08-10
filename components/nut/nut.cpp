@@ -473,13 +473,17 @@ void Nut::resolve_hid_paths_() {
   }
 
   // Enum-valued vars: the HID value indexes a lookup string, like
-  // upstream test_read_info (usbhid-ups.c).
+  // upstream test_read_info (usbhid-ups.c). convert=5 items are internal
+  // ABM inputs used to synthesize battery.charger.status.
   static const struct {
     const char *nut_var;
     const char *hid_path;
     int convert;
   } ENUM_VARS[] = {
       {"ups.test.result", "UPS.BatterySystem.Battery.Test", 4},
+      {"battery.charger.abm.status", "UPS.BatterySystem.Charger.ABMEnable", 5},
+      {"battery.charger.mode.status", "UPS.BatterySystem.Charger.Mode", 5},
+      {"battery.charger.type.status", "UPS.BatterySystem.Charger.Status", 5},
   };
   for (const auto &entry : ENUM_VARS) {
     HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
@@ -627,6 +631,12 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
       long logical = 0;
       GetValue(payload, var.item, &logical);
       if (var.is_string) {
+        if (var.convert == 5) {
+          // Internal ABM input: stash the number, publish nothing.
+          var.value = logical;
+          var.valid = true;
+          continue;
+        }
         if (var.convert == 4) {
           // test_read_info lookup (values 1-7, 0 = no entry).
           static const char *const TEST_RESULTS[] = {
@@ -812,12 +822,66 @@ void Nut::execute_instant_command_(int client_fd, const std::string &command) {
 }
 
 const ResolvedVar *Nut::find_var_(const char *name) const {
+  if (strcmp(name, "battery.charger.status") == 0) {
+    return this->charger_status_var_();
+  }
+  for (const auto &var : this->vars_) {
+    if (strcmp(var.name, name) == 0 && var.valid && var.convert != 5) {
+      return &var;
+    }
+  }
+  return nullptr;
+}
+
+const ResolvedVar *Nut::find_raw_var_(const char *name) const {
   for (const auto &var : this->vars_) {
     if (strcmp(var.name, name) == 0 && var.valid) {
       return &var;
     }
   }
   return nullptr;
+}
+
+// Synthesize battery.charger.status from the ABM inputs, following
+// eaton_abm_* in upstream mge-hid.c: ABMEnable gates publication; Mode and
+// Status are alternative data paths with different value tables.
+const ResolvedVar *Nut::charger_status_var_() const {
+  const auto *abm = this->find_raw_var_("battery.charger.abm.status");
+  if (abm == nullptr || abm->value != 1) {  // ABM not enabled: unpublished upstream
+    return nullptr;
+  }
+  const auto *mode = this->find_raw_var_("battery.charger.mode.status");
+  const auto *status = this->find_raw_var_("battery.charger.type.status");
+
+  const char *text = nullptr;
+  // Prefer the Status path when it reports a known state (upstream picks
+  // whichever path first delivered data; Status exists on newer firmware).
+  if (status != nullptr) {
+    switch (static_cast<int>(status->value)) {
+      case 1: text = "charging"; break;
+      case 2: text = "floating"; break;
+      case 3: text = "resting"; break;
+      case 4: text = "discharging"; break;
+      case 6: text = "off"; break;
+      default: break;
+    }
+  }
+  if (text == nullptr && mode != nullptr) {
+    switch (static_cast<int>(mode->value)) {
+      case 1: text = "charging"; break;
+      case 2: text = "discharging"; break;
+      case 3: text = "floating"; break;
+      case 4: text = "resting"; break;
+      case 6: text = "off"; break;
+      default: break;
+    }
+  }
+  if (text == nullptr) {
+    return nullptr;
+  }
+  strlcpy(this->charger_status_cache_.text, text, sizeof(this->charger_status_cache_.text));
+  this->charger_status_cache_.valid = true;
+  return &this->charger_status_cache_;
 }
 
 std::string Nut::ups_status_() const {
@@ -1032,8 +1096,9 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     this->get_var_value_(client_fd, "device.type");
     this->get_var_value_(client_fd, "driver.name");
     this->get_var_value_(client_fd, "ups.status");
+    this->get_var_value_(client_fd, "battery.charger.status");
     for (const auto &var : this->vars_) {
-      if (var.valid) {
+      if (var.valid && var.convert != 5) {
         this->get_var_value_(client_fd, var.name);
       }
     }
