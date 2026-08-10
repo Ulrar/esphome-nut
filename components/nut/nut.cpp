@@ -164,7 +164,17 @@ void Nut::usb_client_event_callback_(const usb_host_client_event_msg_t *event, v
 
 void Nut::discover_usb_devices_(usb_host_client_handle_t client) {
   ESP_LOGD(TAG, "Scanning USB addresses for already attached devices");
-  for (uint8_t device_address = 1; device_address < 128; device_address++) {
+  uint8_t addresses[16]{};
+  int device_count = 0;
+  const esp_err_t list_result =
+      usb_host_device_addr_list_fill(static_cast<int>(sizeof(addresses)), addresses, &device_count);
+  if (list_result != ESP_OK) {
+    ESP_LOGW(TAG, "Unable to list USB device addresses: %s", esp_err_to_name(list_result));
+    return;
+  }
+
+  for (int index = 0; index < device_count; index++) {
+    const uint8_t device_address = addresses[index];
     usb_device_handle_t device = nullptr;
     if (usb_host_device_open(client, device_address, &device) == ESP_OK) {
       usb_host_device_close(client, device);
@@ -266,7 +276,10 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   setup.wIndex = interface_number;
   setup.wLength = report_length;
 
-  usb_host_transfer_fill_control(transfer, &setup, nullptr, report_length);
+  memset(transfer->data_buffer, 0, transfer->data_buffer_size);
+  memcpy(transfer->data_buffer, &setup, sizeof(setup));
+  transfer->num_bytes = static_cast<int>(sizeof(usb_setup_packet_t) + report_length);
+  transfer->bEndpointAddress = 0;
   transfer->device_handle = device;
   transfer->callback = usb_transfer_callback_;
   transfer->context = &context;
@@ -289,8 +302,11 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   }
 
   const uint8_t *report = transfer->data_buffer + sizeof(usb_setup_packet_t);
-  const size_t actual_length = std::min(static_cast<size_t>(transfer->actual_num_bytes),
-                                        static_cast<size_t>(report_length));
+  size_t transferred_data_bytes = 0;
+  if (transfer->actual_num_bytes > static_cast<int>(sizeof(usb_setup_packet_t))) {
+    transferred_data_bytes = static_cast<size_t>(transfer->actual_num_bytes - sizeof(usb_setup_packet_t));
+  }
+  const size_t actual_length = std::min(transferred_data_bytes, static_cast<size_t>(report_length));
   ESP_LOGI(TAG, "HID report descriptor: interface=%u length=%u", interface_number, actual_length);
   for (size_t offset = 0; offset < actual_length; offset += 16) {
     char line[64];
