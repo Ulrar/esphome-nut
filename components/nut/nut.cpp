@@ -139,10 +139,11 @@ void Nut::usb_client_task_(void *argument) {
   component->discover_usb_devices_(client);
 
   while (true) {
-    const esp_err_t result = usb_host_client_handle_events(client, portMAX_DELAY);
-    if (result != ESP_OK) {
+    const esp_err_t result = usb_host_client_handle_events(client, pdMS_TO_TICKS(5000));
+    if (result != ESP_OK && result != ESP_ERR_TIMEOUT) {
       ESP_LOGW(TAG, "USB client event handling failed: %s", esp_err_to_name(result));
     }
+    component->discover_usb_devices_(client);
   }
 }
 
