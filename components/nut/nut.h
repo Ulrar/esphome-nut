@@ -27,15 +27,18 @@ class Nut : public Component {
   static void usb_daemon_task_(void *argument);
   static void usb_client_task_(void *argument);
   static void usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument);
+  static void usb_transfer_callback_(usb_transfer_t *transfer);
   static void nut_server_task_(void *argument);
 
   void start_usb_host_();
-  void discover_usb_devices_(usb_host_client_handle_t client) const;
+  void discover_usb_devices_(usb_host_client_handle_t client);
   void serve_nut_client_(int client_fd) const;
   void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) const;
   bool is_ups_name_(const std::string &name) const;
   void send_line_(int client_fd, const std::string &line) const;
-  void log_usb_device_(usb_host_client_handle_t client, uint8_t device_address) const;
+  void log_usb_device_(usb_host_client_handle_t client, uint8_t device_address);
+  bool capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device,
+                                      uint8_t interface_number, uint16_t report_length);
 
   std::string ups_name_;
   std::string username_;
@@ -43,6 +46,8 @@ class Nut : public Component {
   std::string description_;
   uint16_t port_{3493};
   volatile bool usb_host_started_{false};
+  uint8_t discovered_device_address_{0};
+  bool report_descriptor_captured_{false};
   Eaton5pxDriver driver_;
 };
 
