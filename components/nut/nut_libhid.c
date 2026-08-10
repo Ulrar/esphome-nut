@@ -111,24 +111,6 @@ double logical_to_physical(HIDData_t *Data, long logical)
 	return physical;
 }
 
-static int8_t get_unit_expo(const HIDData_t *hiddata)
-{
-	int	i;
-	int8_t	unit_expo = hiddata->UnitExp;
-
-	upsdebugx(5, "Unit = %08x, UnitExp = %d", (uint32_t)(hiddata->Unit), hiddata->UnitExp);
-
-	for (i = 0; i < NB_HID_UNITS; i++) {
-
-		if (HIDUnits[i].Type == hiddata->Unit) {
-			unit_expo -= HIDUnits[i].Expo;
-			break;
-		}
-	}
-
-	upsdebugx(5, "Exponent = %d", unit_expo);
-	return unit_expo;
-}
 
 static double exponent(double a, int8_t b)
 {
