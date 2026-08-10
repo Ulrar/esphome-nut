@@ -1000,7 +1000,9 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     *authenticated = *authenticated && arguments == this->password_;
     this->send_line_(client_fd, *authenticated ? "OK" : "ERR ACCESS-DENIED");
   } else if (command == "LOGIN") {
-    this->send_line_(client_fd, (*authenticated && this->is_ups_name_(arguments)) ? "OK" : "ERR ACCESS-DENIED");
+    // Like upsd: LOGIN just registers interest in the UPS; credentials
+    // only gate privileged commands (INSTCMD), not data access.
+    this->send_line_(client_fd, this->is_ups_name_(arguments) ? "OK" : "ERR UNKNOWN-UPS");
   } else if (command == "LOGOUT") {
     *authenticated = false;
     this->send_line_(client_fd, "OK Goodbye");
