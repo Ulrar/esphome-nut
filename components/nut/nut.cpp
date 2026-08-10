@@ -216,8 +216,8 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
     return;
   }
 
-  ESP_LOGI(TAG, "USB device %u: VID=%04X PID=%04X configurations=%u", device_address, descriptor->idVendor,
-           descriptor->idProduct, descriptor->bNumConfigurations);
+  ESP_LOGI(TAG, "USB device %u: VID=%04X PID=%04X bcdDevice=%04X configurations=%u", device_address,
+           descriptor->idVendor, descriptor->idProduct, descriptor->bcdDevice, descriptor->bNumConfigurations);
 
   // Device identity from USB string descriptors (like upstream's
   // format_mfr/format_serial; model adds iModel from HID later).
@@ -393,59 +393,82 @@ bool Nut::get_string_descriptor_(usb_host_client_handle_t client, usb_device_han
 
 bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device,
                                          uint8_t interface_number, uint16_t report_length) {
-  auto *descriptor_copy = static_cast<uint8_t *>(malloc(report_length));
-  if (descriptor_copy == nullptr) {
-    ESP_LOGW(TAG, "Unable to allocate %u bytes for the HID descriptor",
-             static_cast<unsigned>(report_length));
+  auto *scratch = static_cast<uint8_t *>(malloc(REPORT_DSC_SIZE));
+  auto *best_raw = static_cast<uint8_t *>(malloc(REPORT_DSC_SIZE));
+  if (scratch == nullptr || best_raw == nullptr) {
+    ESP_LOGW(TAG, "Unable to allocate the HID descriptor buffers");
+    free(scratch);
+    free(best_raw);
     return false;
   }
-  size_t actual_length = 0;
-  const bool ok = this->get_descriptor_(client, device, USB_HID_REPORT_DESCRIPTOR_TYPE, 0, interface_number,
-                                        descriptor_copy, report_length, &actual_length);
-  if (!ok) {
-    free(descriptor_copy);
+
+  // NUT uses hid_desc_index=1 for Eaton VID 0463 with bcdDevice 0x0202:
+  // those devices expose a reduced descriptor at index 0 and a richer one
+  // at index 1. Try both, keep whichever parses to more items.
+  HIDDesc_t *best_desc = nullptr;
+  size_t best_len = 0;
+  for (uint8_t try_index = 1;; try_index--) {
+    size_t length = 0;
+    if (this->get_descriptor_(client, device, USB_HID_REPORT_DESCRIPTOR_TYPE, try_index, interface_number,
+                              scratch, REPORT_DSC_SIZE, &length) &&
+        length > 0) {
+      HIDDesc_t *parsed = Parse_ReportDesc(scratch, length);
+      if (parsed != nullptr) {
+        ESP_LOGI(TAG, "Report descriptor index %u: %u bytes, %u items", try_index,
+                 static_cast<unsigned>(length), static_cast<unsigned>(parsed->nitems));
+        if (best_desc == nullptr || parsed->nitems > best_desc->nitems) {
+          if (best_desc != nullptr) {
+            Free_ReportDesc(best_desc);
+          }
+          best_desc = parsed;
+          best_len = length;
+          memcpy(best_raw, scratch, length);
+        } else {
+          Free_ReportDesc(parsed);
+        }
+      }
+    }
+    if (try_index == 0) {
+      break;
+    }
+  }
+
+  free(scratch);
+
+  if (best_desc == nullptr) {
+    ESP_LOGW(TAG, "No usable HID report descriptor on the device");
+    free(best_raw);
     return false;
   }
-  ESP_LOGI(TAG, "HID report descriptor: interface=%u length=%u", interface_number,
-           static_cast<unsigned>(actual_length));
 
   if (this->hid_desc_ != nullptr) {
     Free_ReportDesc(this->hid_desc_);
-    this->hid_desc_ = nullptr;
   }
-  // Keep the raw descriptor around for the DUMPDESC debug command.
+  this->hid_desc_ = best_desc;
   if (this->raw_desc_ != nullptr) {
     free(this->raw_desc_);
   }
-  this->raw_desc_ = descriptor_copy;
-  this->raw_desc_len_ = actual_length;
-  this->hid_desc_ = Parse_ReportDesc(descriptor_copy, actual_length);
+  this->raw_desc_ = best_raw;
+  this->raw_desc_len_ = best_len;
 
-  ESP_LOGI(TAG, "HID report descriptor captured: %u bytes, parsing", static_cast<unsigned>(actual_length));
-  if (this->hid_desc_ == nullptr) {
-    ESP_LOGW(TAG, "Upstream HID parser rejected the report descriptor");
-    return false;
-  }
-  ESP_LOGI(TAG, "Parsed %u HID items", static_cast<unsigned>(this->hid_desc_->nitems));
+  ESP_LOGI(TAG, "Using HID report descriptor: %u bytes, %u items", static_cast<unsigned>(best_len),
+           static_cast<unsigned>(best_desc->nitems));
 
-  // Report the UPS USB personality mode (UPS.System.USB.Mode, 0xFD) so we
-  // can tell whether the unit exposes its reduced or full HID descriptor.
-  {
-    HIDData_t *mode_item = nut_hid_find_object(this->hid_desc_, "UPS.System.USB.Mode");
-    if (mode_item != nullptr) {
-      uint8_t report[8] = {0};
-      size_t actual = 0;
-      if (this->request_hid_report_(client, device, this->hid_interface_number_, HID_REPORT_TYPE_FEATURE,
-                                    mode_item->ReportID, sizeof(report), report, &actual) && actual > 0) {
-        if (report[0] != mode_item->ReportID) {
-          memmove(report + 1, report, std::min<size_t>(actual, sizeof(report) - 1));
-          report[0] = mode_item->ReportID;
-        }
-        long mode = 0;
-        GetValue(report, mode_item, &mode);
-        ESP_LOGI(TAG, "USB.Mode = %ld (report 0x%02X, %u bytes)", mode, mode_item->ReportID,
-                 static_cast<unsigned>(actual));
+  // Report the UPS USB personality mode (UPS.System.USB.Mode) when present.
+  HIDData_t *mode_item = nut_hid_find_object(this->hid_desc_, "UPS.System.USB.Mode");
+  if (mode_item != nullptr) {
+    uint8_t report[8] = {0};
+    size_t actual = 0;
+    if (this->request_hid_report_(client, device, this->hid_interface_number_, HID_REPORT_TYPE_FEATURE,
+                                  mode_item->ReportID, sizeof(report), report, &actual) &&
+        actual > 0) {
+      if (report[0] != mode_item->ReportID) {
+        memmove(report + 1, report, std::min<size_t>(actual, sizeof(report) - 1));
+        report[0] = mode_item->ReportID;
       }
+      long mode = 0;
+      GetValue(report, mode_item, &mode);
+      ESP_LOGI(TAG, "USB.Mode = %ld (report 0x%02X)", mode, mode_item->ReportID);
     }
   }
 
