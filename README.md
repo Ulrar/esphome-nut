@@ -1,80 +1,73 @@
-# ESPHome Eaton 5PX NUT server
+# ESPHome NUT server for USB HID UPS devices
 
-An ESPHome external component intended to expose USB HID UPS devices as NUT
-servers over TCP/3493. It is designed for an ESP32-S3 using the native USB-OTG
-interface in host mode. The Eaton 5PX 1500i RT2U G2 is the initial target.
+An ESPHome external component that turns an ESP32-S3 into a NUT (Network UPS
+Tools) server on TCP/3493, talking to a USB HID UPS directly over the S3's
+native USB-OTG host interface. Developed against an Eaton 5PX 1500i RT2U G2,
+but the mapping tables cover the whole `mge-hid` (Eaton/MGE) family.
 
-## Current milestone
+## How it works
 
-The component starts an authenticated NUT protocol endpoint and initializes
-the ESP-IDF USB host. It deliberately reports `ups.status` as `WAIT` and
-does not expose control commands until a capture of the UPS HID report
-descriptor has been taken from the target UPS. It will not issue power,
-battery-test, or beeper commands in this state.
+The component vendors the actual NUT HID parser (`hidparser.c`), the
+`libhid.c` path/scaling helpers, and the `mge-hid.c` variable mapping tables
+from [networkupstools/nut](https://github.com/networkupstools/nut) (GPL-2.0+,
+see `components/nut/LICENSE-GPL2-upstream`). At runtime it:
 
-This is the safe foundation for the hardware-specific implementation, not a
-replacement for a working NUT server yet.
+1. Captures the UPS HID report descriptor over USB.
+2. Resolves official NUT HID paths (`UPS.PowerSummary.RemainingCapacity`,
+   `UPS.PowerConverter.Output.Voltage`, ...) against the descriptor using the
+   vendored parser — exactly what `usbhid-ups` does on a Linux host.
+3. Polls the resolved reports and serves the values with upstream NUT
+   variable names, formats and scaling on an authenticated NUT protocol
+   endpoint.
 
-## Hardware
-
-The ESP32-S3 board must expose the native USB-OTG D+/D- signals, usually
-GPIO20/GPIO19, and supply VBUS in host mode. A USB-to-UART bridge port is not
-sufficient. Connect the UPS USB-B port to the ESP32-S3 host port with an
-appropriate OTG/host adapter or host-capable USB-C configuration.
-
-The S3 USB PHY cannot be shared with USB Serial/JTAG. The example moves
-ESPHome logging to `UART0`; after initial flashing use ESPHome OTA.
-
-## Configuration
-
-Copy `example/eaton-5px.yaml` into an ESPHome configuration directory, replace
-its local `external_components` source with your repository URL, and provide
-these `secrets.yaml` values:
-
-```yaml
-external_components:
-  - source:
-      type: git
-      url: https://github.com/YOUR_ACCOUNT/esp32-nut
-      ref: initial
-    components: [nut]
-```
-
-`initial` is the testing branch. Once it is merged, use `main`; for
-repeatable production builds, use a tag or commit SHA.
-
-```yaml
-wifi_ssid: your-wifi-name
-wifi_password: your-wifi-password
-nut_username: a-non-default-nut-user
-nut_password: a-long-random-password
-```
-
-Once connected, NUT clients can query:
+Any NUT client (`upsc`, `upsmon`, Home Assistant, Proxmox, ...) can connect:
 
 ```sh
 upsc eaton@ESP_IP
 ```
 
-The server does not use TLS. Restrict TCP/3493 to a trusted LAN or VLAN and
-use a unique long password.
+## Hardware
 
-The example config also includes ESPHome debug heap sensors (`free` and max
-allocatable block) to watch RAM headroom while enabling additional mappings.
+The ESP32-S3 board must expose the native USB-OTG D+/D- signals (usually
+GPIO19/GPIO20) and supply VBUS in host mode. A USB-to-UART bridge port is
+not sufficient. Connect the UPS USB-B port to the S3 host port with a
+host-capable adapter.
 
-## Design
+The S3 USB PHY cannot be shared with USB Serial/JTAG, so the example moves
+ESPHome logging to `UART0`; after initial flashing use OTA.
 
-The project uses the ESP32 NUT proof of concept by
-[`banoz/nut`](https://github.com/banoz/nut/tree/esp32-alpha) as a reference
-for task separation and ESP-IDF USB hosting. It intentionally does not carry
-that fork's hard-coded Wi-Fi credentials, writable FAT configuration,
-POSIX compatibility shims, or standalone application lifecycle.
+## Configuration
 
-NUT's existing [`mge-hid` mapping](https://github.com/networkupstools/nut/blob/master/drivers/mge-hid.c)
-is the reference for the Eaton 5PX HID fields and commands. The next hardware
-milestone is to capture and parse the report descriptor for the connected
-UPS firmware before enabling telemetry and instant commands.
+See `example/eaton-5px.yaml`. The component is sourced directly from git:
 
-`UpsDriver` defines the UPS-specific boundary. `Eaton5pxDriver` is the first
-implementation; additional HID drivers should implement that interface rather
-than extending the NUT server or ESPHome lifecycle code.
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/Ulrar/esphome-nut
+      ref: initial
+    refresh: 0s
+    components: [nut]
+
+nut:
+  ups_name: eaton
+  username: !secret nut_username
+  password: !secret nut_password
+  description: Eaton 5PX 1500i RT2U G2
+```
+
+`initial` is the development branch. For repeatable builds, pin a commit SHA.
+
+The server speaks plain-text NUT without TLS: restrict TCP/3493 to a trusted
+LAN/VLAN and use a unique long password.
+
+## Debugging
+
+- The `DUMPDESC` command on the NUT port streams the raw HID report
+  descriptor as hex (e.g. `echo DUMPDESC | nc ESP_IP 3493`).
+- At DEBUG log level the full parsed HID path tree is dumped on attach.
+- The example config includes heap debug sensors to watch RAM headroom.
+
+## License
+
+GPL-2.0-or-later, following the vendored NUT driver code.

@@ -219,7 +219,6 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
 
   // Fetch the configuration descriptor with a manual control transfer;
   // usb_host_get_active_config_descriptor() hangs on this device.
-  ESP_LOGI(TAG, "Fetching configuration descriptor");
   uint8_t config_buffer[512]{};
   size_t config_actual = 0;
   if (!this->get_descriptor_(client, device, USB_B_DESCRIPTOR_TYPE_CONFIGURATION, 0, 0, config_buffer, 9,
@@ -239,16 +238,6 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   }
   const uint8_t *config_data = config_buffer;
   const uint16_t config_length = static_cast<uint16_t>(std::min<size_t>(config_actual, sizeof(config_buffer)));
-  ESP_LOGI(TAG, "Configuration descriptor: %u bytes", config_length);
-  for (uint16_t off = 0; off + 2 <= config_length;) {
-    const uint8_t dlen = config_data[off];
-    const uint8_t dtype = config_data[off + 1];
-    if (dlen < 2 || off + dlen > config_length) {
-      break;
-    }
-    ESP_LOGD(TAG, "  desc off=%u len=%u type=0x%02X", off, dlen, dtype);
-    off += dlen;
-  }
 
   uint8_t hid_interface = 0;
   uint16_t report_length = 0;
@@ -278,13 +267,11 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   } else if (report_length > MAX_HID_REPORT_DESCRIPTOR_LENGTH) {
     ESP_LOGW(TAG, "HID report descriptor is too large: %u bytes", report_length);
   } else {
-    // Dev mode: re-capture and re-parse on every scan so the verbose
-    // tree dump is visible whenever a log client is attached.
-    this->discovered_device_address_ = device_address;
-    this->hid_interface_number_ = hid_interface;
-    ESP_LOGI(TAG, "Capturing HID report descriptor: interface=%u length=%u", hid_interface, report_length);
-    const bool ok = this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
-    ESP_LOGI(TAG, "HID capture %s", ok ? "succeeded" : "failed");
+    if (this->hid_desc_ == nullptr || this->discovered_device_address_ != device_address) {
+      this->discovered_device_address_ = device_address;
+      this->hid_interface_number_ = hid_interface;
+      this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
+    }
     if (this->hid_desc_ != nullptr) {
       this->poll_hid_reports_(client, device);
     }
@@ -430,15 +417,13 @@ void Nut::resolve_hid_paths_() {
   this->bools_.clear();
   this->report_requests_.clear();
 
-  // Targeted dump: only input-side and power-converter paths, which
-  // survive the lossy log transport better than the full 110-item dump.
-  {
+  // Full HID tree dump at debug level, like upstream HIDDumpTree().
+  if (this->hid_desc_ != nullptr) {
     char path[160];
     for (size_t i = 0; i < this->hid_desc_->nitems; i++) {
       const HIDData_t *item = &this->hid_desc_->item[i];
-      if (nut_path_to_string(path, sizeof(path), &item->Path) > 0 &&
-          (strstr(path, "PowerConverter") != nullptr || strstr(path, "Flow") != nullptr)) {
-        ESP_LOGI(TAG, "Path: %s, Type: %s, ReportID: 0x%02X, Offset: %u, Size: %u", path,
+      if (nut_path_to_string(path, sizeof(path), &item->Path) > 0) {
+        ESP_LOGD(TAG, "Path: %s, Type: %s, ReportID: 0x%02X, Offset: %u, Size: %u", path,
                  item->Type == ITEM_FEATURE ? "Feature" : item->Type == ITEM_INPUT ? "Input" : "Output",
                  item->ReportID, item->Offset, item->Size);
       }
