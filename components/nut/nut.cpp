@@ -236,8 +236,6 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   const uint8_t *config_data = config_buffer;
   const uint16_t config_length = static_cast<uint16_t>(std::min<size_t>(config_actual, sizeof(config_buffer)));
 
-  const uint8_t *config_data = reinterpret_cast<const uint8_t *>(config_descriptor);
-  const uint16_t config_length = config_descriptor->wTotalLength;
   uint8_t hid_interface = 0;
   uint16_t report_length = 0;
   bool hid_interface_found = false;
