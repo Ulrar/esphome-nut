@@ -924,15 +924,22 @@ void Nut::run_pending_commands_(usb_host_client_handle_t client, usb_device_hand
   }
   const auto &command = this->commands_[index];
   ESP_LOGI(TAG, "Executing command %s (value %ld)", command.name, command.value);
-  bool ok = this->send_hid_report_(client, device, command.item, command.value);
-  // outlet.N.load.cycle = off then on (NUT convention). The mapped path is
-  // DelayBeforeShutdown; the matching DelayBeforeStartup turns it back on.
-  if (ok && strstr(command.name, ".load.cycle") != nullptr) {
+  bool ok = true;
+  // outlet.N.load.cycle: schedule startup (10s delay) BEFORE the shutdown so
+  // the outlet re-powers even if this board is powered from it and dies at
+  // "off". Then shut down immediately. 10s gives a clean power gap.
+  if (strstr(command.name, ".load.cycle") != nullptr) {
     const std::string on_path = std::string(command.hid_path).replace(
         std::string(command.hid_path).find("DelayBeforeShutdown"), std::string("DelayBeforeShutdown").size(),
         "DelayBeforeStartup");
     HIDData_t *on_item = nut_hid_find_object(this->hid_desc_, on_path.c_str());
-    ok = on_item != nullptr && this->send_hid_report_(client, device, on_item, 0);
+    if (on_item == nullptr || !this->send_hid_report_(client, device, on_item, 10)) {
+      ESP_LOGW(TAG, "load.cycle: could not schedule outlet startup, aborting");
+      ok = false;
+    }
+  }
+  if (ok) {
+    ok = this->send_hid_report_(client, device, command.item, command.value);
   }
   this->command_result_ = ok ? 0 : 1;
   this->pending_command_ = -1;

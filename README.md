@@ -84,9 +84,10 @@ here so they can be upstreamed or reworked:
 - **ABM charger status** (`battery.charger.status` from
   `Charger.Mode`/`Charger.Status`) is synthesized in `nut.cpp` instead of
   using upstream's `eaton_abm_*` state machine.
-- **`outlet.N.load.cycle`** is implemented as DelayBeforeShutdown(0)
-  followed by DelayBeforeStartup(0) — NUT convention for power-cycle — and
-  is listed so Home Assistant discovers its per-outlet restart button.
+- **`outlet.N.load.cycle`** schedules DelayBeforeStartup(10) *before*
+  DelayBeforeShutdown(0), so the outlet re-powers after a 10s gap even if
+  this board is itself powered from that outlet and dies at "off". It is
+  listed so Home Assistant discovers its per-outlet restart button.
 - **NUT protocol** is a subset: `LIST UPS/VAR/CMD`, `GET VAR/CMDDESC`,
   `INSTCMD`, `USERNAME/PASSWORD/LOGIN/LOGOUT`, `VER/PING`, plus a
   non-standard `DUMPDESC` debug command. No TLS, no `SET`, no tracking.
