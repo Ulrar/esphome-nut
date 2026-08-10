@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <string>
 
@@ -23,6 +26,8 @@ static constexpr size_t NUT_LINE_LENGTH = 256;
 static constexpr uint8_t USB_HID_DESCRIPTOR_TYPE = 0x21;
 static constexpr uint8_t USB_HID_REPORT_DESCRIPTOR_TYPE = 0x22;
 static constexpr uint16_t MAX_HID_REPORT_DESCRIPTOR_LENGTH = 2048;
+static constexpr uint8_t HID_REPORT_TYPE_INPUT = 1;
+static constexpr uint8_t HID_REPORT_TYPE_FEATURE = 3;
 
 struct UsbClientContext {
   Nut *component;
@@ -202,11 +207,6 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   ESP_LOGI(TAG, "USB device %u: VID=%04X PID=%04X configurations=%u", device_address, descriptor->idVendor,
            descriptor->idProduct, descriptor->bNumConfigurations);
 
-  const bool already_captured = this->discovered_device_address_ == device_address && this->report_descriptor_captured_;
-  if (already_captured) {
-    ESP_LOGD(TAG, "Re-reading HID report descriptor for diagnostics");
-  }
-
   const usb_config_desc_t *config_descriptor = nullptr;
   const esp_err_t config_result = usb_host_get_active_config_descriptor(device, &config_descriptor);
   if (config_result != ESP_OK || config_descriptor == nullptr) {
@@ -245,9 +245,15 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   } else if (report_length > MAX_HID_REPORT_DESCRIPTOR_LENGTH) {
     ESP_LOGW(TAG, "HID report descriptor is too large: %u bytes", report_length);
   } else {
-    this->discovered_device_address_ = device_address;
-    this->report_descriptor_captured_ =
-        this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
+    if (!this->report_descriptor_captured_ || this->discovered_device_address_ != device_address) {
+      this->discovered_device_address_ = device_address;
+      this->hid_interface_number_ = hid_interface;
+      this->report_descriptor_captured_ =
+          this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
+    }
+    if (this->report_descriptor_captured_) {
+      this->poll_hid_reports_(client, device);
+    }
   }
   usb_host_device_close(client, device);
 }
@@ -319,8 +325,329 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
     ESP_LOGI(TAG, "%s", line);
   }
 
+  const bool parsed = this->parse_hid_report_descriptor_(report, actual_length);
+  ESP_LOGI(TAG, "HID mapping fields=%u reports=%u", this->report_field_count_, this->report_request_count_);
+
   usb_host_transfer_free(transfer);
-  return actual_length > 0;
+  return actual_length > 0 && parsed;
+}
+
+bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descriptor_length) {
+  this->report_field_count_ = 0;
+  this->report_request_count_ = 0;
+  this->has_ac_present_field_ = false;
+
+  struct {
+    uint16_t usage_page{0};
+    int32_t logical_min{0};
+    int32_t logical_max{0};
+    uint32_t report_size{0};
+    uint32_t report_count{0};
+    uint8_t report_id{0};
+    int8_t exponent{0};
+  } globals;
+  uint8_t collection_stack[8]{};
+  uint8_t collection_depth = 0;
+  uint16_t local_usages[16]{};
+  uint8_t local_usage_count = 0;
+  uint16_t local_usage_min = 0;
+  uint16_t local_usage_max = 0;
+  bool has_usage_range = false;
+  uint16_t bit_offsets[4][256]{};
+
+  auto reset_local = [&]() {
+    local_usage_count = 0;
+    has_usage_range = false;
+    local_usage_min = 0;
+    local_usage_max = 0;
+  };
+
+  for (size_t index = 0; index < descriptor_length;) {
+    const uint8_t prefix = descriptor[index++];
+    if (prefix == 0xFE) {
+      if (index + 1 >= descriptor_length) {
+        break;
+      }
+      const uint8_t item_size = descriptor[index++];
+      index++;  // long-item tag
+      index += std::min(static_cast<size_t>(item_size), descriptor_length - index);
+      continue;
+    }
+
+    uint8_t item_size = prefix & 0x03;
+    if (item_size == 3) {
+      item_size = 4;
+    }
+    const uint8_t item_type = (prefix >> 2) & 0x03;
+    const uint8_t item_tag = (prefix >> 4) & 0x0F;
+    if (index + item_size > descriptor_length) {
+      break;
+    }
+
+    uint32_t value = 0;
+    for (uint8_t b = 0; b < item_size; b++) {
+      value |= static_cast<uint32_t>(descriptor[index + b]) << (8 * b);
+    }
+    const bool signed_value = item_size > 0 && ((descriptor[index + item_size - 1] & 0x80) != 0);
+    int32_t svalue = static_cast<int32_t>(value);
+    if (signed_value && item_size < 4) {
+      svalue |= static_cast<int32_t>(~0u << (item_size * 8));
+    }
+    index += item_size;
+
+    if (item_type == 1) {  // global
+      if (item_tag == 0x0) {
+        globals.usage_page = static_cast<uint16_t>(value);
+      } else if (item_tag == 0x1) {
+        globals.logical_min = svalue;
+      } else if (item_tag == 0x2) {
+        globals.logical_max = svalue;
+      } else if (item_tag == 0x7) {
+        globals.report_size = value;
+      } else if (item_tag == 0x8) {
+        globals.report_id = static_cast<uint8_t>(value);
+      } else if (item_tag == 0x9) {
+        globals.report_count = value;
+      } else if (item_tag == 0x5) {
+        if (item_size == 1 && value <= 0x0F) {
+          globals.exponent = (value & 0x08) ? static_cast<int8_t>(value) - 16 : static_cast<int8_t>(value);
+        } else {
+          globals.exponent = static_cast<int8_t>(svalue);
+        }
+      }
+      continue;
+    }
+
+    if (item_type == 2) {  // local
+      if (item_tag == 0x0 && local_usage_count < sizeof(local_usages) / sizeof(local_usages[0])) {
+        local_usages[local_usage_count++] = static_cast<uint16_t>(value);
+      } else if (item_tag == 0x1) {
+        local_usage_min = static_cast<uint16_t>(value);
+        has_usage_range = true;
+      } else if (item_tag == 0x2) {
+        local_usage_max = static_cast<uint16_t>(value);
+        has_usage_range = true;
+      }
+      continue;
+    }
+
+    if (item_type != 0) {
+      continue;
+    }
+
+    if (item_tag == 0xA) {  // collection
+      if (collection_depth < sizeof(collection_stack)) {
+        uint16_t usage = 0;
+        if (local_usage_count > 0) {
+          usage = local_usages[local_usage_count - 1];
+        } else if (has_usage_range) {
+          usage = local_usage_min;
+        }
+        collection_stack[collection_depth++] = static_cast<uint8_t>(usage);
+      }
+      reset_local();
+      continue;
+    }
+
+    if (item_tag == 0xC) {  // end collection
+      if (collection_depth > 0) {
+        collection_depth--;
+      }
+      continue;
+    }
+
+    if (item_tag != 0x8 && item_tag != 0xB) {  // input/feature only
+      reset_local();
+      continue;
+    }
+
+    const uint8_t report_type = item_tag == 0x8 ? HID_REPORT_TYPE_INPUT : HID_REPORT_TYPE_FEATURE;
+    const bool is_constant = (value & 0x01) != 0;
+    const uint32_t count = std::max<uint32_t>(1, globals.report_count);
+    const uint32_t bits = globals.report_size;
+    uint8_t collection_mask = 0;
+    for (uint8_t depth = 0; depth < collection_depth; depth++) {
+      if (collection_stack[depth] == 0x1A) {
+        collection_mask |= COLLECTION_INPUT;
+      } else if (collection_stack[depth] == 0x1C) {
+        collection_mask |= COLLECTION_OUTPUT;
+      } else if (collection_stack[depth] == 0x24) {
+        collection_mask |= COLLECTION_POWER_SUMMARY;
+      } else if (collection_stack[depth] == 0x10) {
+        collection_mask |= COLLECTION_BATTERY_SYSTEM;
+      }
+    }
+
+    for (uint32_t item_index = 0; item_index < count; item_index++) {
+      const uint16_t usage =
+          item_index < local_usage_count
+              ? local_usages[item_index]
+              : (has_usage_range ? static_cast<uint16_t>(local_usage_min + item_index) : 0);
+      const UpsSignal signal = this->driver_.classify_field(globals.usage_page, usage, collection_mask);
+      const uint16_t offset = bit_offsets[report_type][globals.report_id];
+      bit_offsets[report_type][globals.report_id] += bits;
+      if (is_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
+        continue;
+      }
+      this->report_fields_[this->report_field_count_++] = {
+          globals.report_id,
+          report_type,
+          offset,
+          static_cast<uint8_t>(bits),
+          globals.logical_min < 0,
+          globals.exponent,
+          signal,
+      };
+      if (signal == UpsSignal::AC_PRESENT) {
+        this->has_ac_present_field_ = true;
+      }
+
+      bool found = false;
+      for (uint8_t request_index = 0; request_index < this->report_request_count_; request_index++) {
+        auto &request = this->report_requests_[request_index];
+        if (request.report_id == globals.report_id && request.report_type == report_type) {
+          request.required_bits = std::max<uint16_t>(request.required_bits, static_cast<uint16_t>(offset + bits));
+          found = true;
+          break;
+        }
+      }
+      if (!found && this->report_request_count_ < 16) {
+        this->report_requests_[this->report_request_count_++] = {
+            globals.report_id,
+            report_type,
+            static_cast<uint16_t>(offset + bits),
+        };
+      }
+    }
+    reset_local();
+  }
+
+  return this->report_field_count_ > 0 && this->report_request_count_ > 0;
+}
+
+void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t device) {
+  if (this->report_request_count_ == 0) {
+    return;
+  }
+  uint8_t report_buffer[128]{};
+  bool any_ok = false;
+  for (uint8_t request_index = 0; request_index < this->report_request_count_; request_index++) {
+    const auto &request = this->report_requests_[request_index];
+    const uint16_t bytes = static_cast<uint16_t>(std::min<uint16_t>(127, (request.required_bits + 7) / 8));
+    size_t actual = 0;
+    if (!this->request_hid_report_(client, device, this->hid_interface_number_, request.report_type, request.report_id, bytes,
+                                   report_buffer, &actual)) {
+      continue;
+    }
+    any_ok = true;
+    this->apply_report_data_(request.report_type, request.report_id, report_buffer, actual);
+  }
+
+  if (any_ok && !this->has_ac_present_field_) {
+    this->driver_.set_ac_present(true);
+  }
+}
+
+bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t interface_number,
+                              uint8_t report_type, uint8_t report_id, uint16_t report_length, uint8_t *buffer,
+                              size_t *buffer_length) {
+  usb_transfer_t *transfer = nullptr;
+  const esp_err_t allocation_result =
+      usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + report_length + 1, 0, &transfer);
+  if (allocation_result != ESP_OK) {
+    return false;
+  }
+
+  TransferContext context{false};
+  usb_setup_packet_t setup{};
+  setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+  setup.bRequest = 0x01;  // GET_REPORT
+  setup.wValue = static_cast<uint16_t>((report_type << 8) | report_id);
+  setup.wIndex = interface_number;
+  setup.wLength = report_length + 1;
+
+  memset(transfer->data_buffer, 0, transfer->data_buffer_size);
+  memcpy(transfer->data_buffer, &setup, sizeof(setup));
+  transfer->num_bytes = static_cast<int>(sizeof(usb_setup_packet_t) + setup.wLength);
+  transfer->bEndpointAddress = 0;
+  transfer->device_handle = device;
+  transfer->callback = usb_transfer_callback_;
+  transfer->context = &context;
+
+  const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
+  if (submit_result != ESP_OK) {
+    usb_host_transfer_free(transfer);
+    return false;
+  }
+
+  for (uint8_t attempts = 0; attempts < 10 && !context.complete; attempts++) {
+    usb_host_client_handle_events(client, pdMS_TO_TICKS(50));
+  }
+
+  if (!context.complete || transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+    usb_host_transfer_free(transfer);
+    return false;
+  }
+
+  size_t payload = 0;
+  if (transfer->actual_num_bytes > static_cast<int>(sizeof(usb_setup_packet_t))) {
+    payload = static_cast<size_t>(transfer->actual_num_bytes - sizeof(usb_setup_packet_t));
+  }
+  payload = std::min(payload, static_cast<size_t>(report_length + 1));
+  memcpy(buffer, transfer->data_buffer + sizeof(usb_setup_packet_t), payload);
+  *buffer_length = payload;
+  usb_host_transfer_free(transfer);
+  return payload > 0;
+}
+
+uint64_t Nut::extract_bits_(const uint8_t *data, size_t data_length, uint16_t bit_offset, uint8_t bit_size) {
+  uint64_t value = 0;
+  for (uint8_t bit = 0; bit < bit_size; bit++) {
+    const uint16_t absolute = static_cast<uint16_t>(bit_offset + bit);
+    const size_t byte_index = absolute / 8;
+    if (byte_index >= data_length) {
+      break;
+    }
+    const uint8_t mask = static_cast<uint8_t>(1u << (absolute % 8));
+    if ((data[byte_index] & mask) != 0) {
+      value |= static_cast<uint64_t>(1) << bit;
+    }
+  }
+  return value;
+}
+
+float Nut::apply_exponent_(float value, int8_t exponent) {
+  if (exponent == 0) {
+    return value;
+  }
+  return value * std::pow(10.0f, static_cast<float>(exponent));
+}
+
+void Nut::apply_report_data_(uint8_t report_type, uint8_t report_id, const uint8_t *report, size_t report_length) {
+  size_t payload_offset = 0;
+  if (report_length > 1 && report[0] == report_id) {
+    payload_offset = 1;
+  }
+  const uint8_t *payload = report + payload_offset;
+  const size_t payload_length = report_length - payload_offset;
+
+  for (uint8_t field_index = 0; field_index < this->report_field_count_; field_index++) {
+    const auto &field = this->report_fields_[field_index];
+    if (field.report_id != report_id || field.report_type != report_type) {
+      continue;
+    }
+    uint64_t raw = extract_bits_(payload, payload_length, field.bit_offset, field.bit_size);
+    int64_t signed_raw = static_cast<int64_t>(raw);
+    if (field.is_signed && field.bit_size < 64 && ((raw >> (field.bit_size - 1)) & 1u)) {
+      signed_raw |= (~0ULL << field.bit_size);
+    }
+    float value = apply_exponent_(static_cast<float>(field.is_signed ? signed_raw : raw), field.exponent);
+    if (field.signal == UpsSignal::AC_PRESENT) {
+      this->driver_.set_ac_present(value > 0.5f);
+    } else {
+      this->driver_.apply_signal_value(field.signal, value);
+    }
+  }
 }
 
 void Nut::nut_server_task_(void *argument) {
@@ -396,6 +723,12 @@ void Nut::send_line_(int client_fd, const std::string &line) const {
 void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) const {
   const std::string command = first_word(line);
   const std::string arguments = after_first_word(line);
+  const auto &readings = this->driver_.readings();
+  auto send_float_var = [&](const char *name, float value) {
+    char value_text[24];
+    snprintf(value_text, sizeof(value_text), "%.2f", value);
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " " + name + " \"" + value_text + "\"");
+  };
 
   if (command == "VER") {
     this->send_line_(client_fd, "Network UPS Tools upsd 2.8.2-esp-home");
@@ -423,6 +756,21 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.firmware \"" + this->driver_.firmware() + "\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"nut\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
+    if (readings.has_input_voltage) {
+      send_float_var("input.voltage", readings.input_voltage);
+    }
+    if (readings.has_output_voltage) {
+      send_float_var("output.voltage", readings.output_voltage);
+    }
+    if (readings.has_load_percent) {
+      send_float_var("ups.load", readings.load_percent);
+    }
+    if (readings.has_battery_charge) {
+      send_float_var("battery.charge", readings.battery_charge);
+    }
+    if (readings.has_runtime_seconds) {
+      send_float_var("battery.runtime", readings.runtime_seconds);
+    }
     this->send_line_(client_fd, "END LIST VAR " + this->ups_name_);
   } else if (command == "GET") {
     const std::string expected_prefix = "VAR " + this->ups_name_ + " ";
@@ -441,6 +789,16 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"nut\"");
     } else if (variable == "ups.status") {
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
+    } else if (variable == "input.voltage" && readings.has_input_voltage) {
+      send_float_var("input.voltage", readings.input_voltage);
+    } else if (variable == "output.voltage" && readings.has_output_voltage) {
+      send_float_var("output.voltage", readings.output_voltage);
+    } else if (variable == "ups.load" && readings.has_load_percent) {
+      send_float_var("ups.load", readings.load_percent);
+    } else if (variable == "battery.charge" && readings.has_battery_charge) {
+      send_float_var("battery.charge", readings.battery_charge);
+    } else if (variable == "battery.runtime" && readings.has_runtime_seconds) {
+      send_float_var("battery.runtime", readings.runtime_seconds);
     } else {
       this->send_line_(client_fd, "ERR VAR-NOT-SUPPORTED");
     }
