@@ -436,8 +436,15 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
       uint8_t report[8] = {0};
       size_t actual = 0;
       if (this->request_hid_report_(client, device, this->hid_interface_number_, HID_REPORT_TYPE_FEATURE,
-                                    mode_item->ReportID, sizeof(report), report, &actual) && actual > 1) {
-        ESP_LOGI(TAG, "USB.Mode = %u", report[1]);
+                                    mode_item->ReportID, sizeof(report), report, &actual) && actual > 0) {
+        if (report[0] != mode_item->ReportID) {
+          memmove(report + 1, report, std::min<size_t>(actual, sizeof(report) - 1));
+          report[0] = mode_item->ReportID;
+        }
+        long mode = 0;
+        GetValue(report, mode_item, &mode);
+        ESP_LOGI(TAG, "USB.Mode = %ld (report 0x%02X, %u bytes)", mode, mode_item->ReportID,
+                 static_cast<unsigned>(actual));
       }
     }
   }
