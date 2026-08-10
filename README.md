@@ -36,11 +36,12 @@ external_components:
   - source:
       type: git
       url: https://github.com/YOUR_ACCOUNT/esp32-nut
-      ref: main
+      ref: initial
     components: [nut]
 ```
 
-For repeatable production builds, replace `main` with a tag or commit SHA.
+`initial` is the testing branch. Once it is merged, use `main`; for
+repeatable production builds, use a tag or commit SHA.
 
 ```yaml
 wifi_ssid: your-wifi-name
