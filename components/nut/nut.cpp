@@ -909,6 +909,7 @@ void Nut::nut_server_task_(void *argument) {
     if (client_fd < 0) {
       continue;
     }
+    ESP_LOGI(TAG, "NUT client connected (fd=%d)", client_fd);
     // Serve each connection on its own task so long-lived clients
     // (upsmon) don't block others. The arg must outlive the task start.
     auto *args = new (std::nothrow) std::pair<Nut *, int>(component, client_fd);
@@ -927,6 +928,7 @@ void Nut::nut_client_task_(void *argument) {
   const int client_fd = args->second;
   delete args;
   component->serve_nut_client_(client_fd);
+  ESP_LOGI(TAG, "NUT client disconnected (fd=%d)", client_fd);
   close(client_fd);
   vTaskDelete(nullptr);
 }
