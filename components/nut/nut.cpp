@@ -425,13 +425,15 @@ void Nut::resolve_hid_paths_() {
   this->bools_.clear();
   this->report_requests_.clear();
 
-  // Debug dump of the full HID tree, like upstream HIDDumpTree().
+  // Targeted dump: only input-side and power-converter paths, which
+  // survive the lossy log transport better than the full 110-item dump.
   {
     char path[160];
     for (size_t i = 0; i < this->hid_desc_->nitems; i++) {
       const HIDData_t *item = &this->hid_desc_->item[i];
-      if (nut_path_to_string(path, sizeof(path), &item->Path) > 0) {
-        ESP_LOGD(TAG, "Path: %s, Type: %s, ReportID: 0x%02X, Offset: %u, Size: %u", path,
+      if (nut_path_to_string(path, sizeof(path), &item->Path) > 0 &&
+          (strstr(path, "PowerConverter") != nullptr || strstr(path, "Flow") != nullptr)) {
+        ESP_LOGI(TAG, "Path: %s, Type: %s, ReportID: 0x%02X, Offset: %u, Size: %u", path,
                  item->Type == ITEM_FEATURE ? "Feature" : item->Type == ITEM_INPUT ? "Input" : "Output",
                  item->ReportID, item->Offset, item->Size);
       }
