@@ -13,6 +13,8 @@ enum class UpsSignal : uint8_t {
   BATTERY_CHARGE,
   RUNTIME_SECONDS,
   AC_PRESENT,
+  CHARGING,
+  DISCHARGING,
 };
 
 enum CollectionMask : uint32_t {
@@ -30,11 +32,15 @@ struct DriverReadings {
   bool has_load_percent{false};
   bool has_battery_charge{false};
   bool has_runtime_seconds{false};
+  bool has_charging{false};
+  bool has_discharging{false};
   float input_voltage{0.0f};
   float output_voltage{0.0f};
   float load_percent{0.0f};
   float battery_charge{0.0f};
   float runtime_seconds{0.0f};
+  bool charging{false};
+  bool discharging{false};
 };
 
 class UpsDriver {

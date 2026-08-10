@@ -14,7 +14,10 @@ class Eaton5pxDriver : public UpsDriver {
     if (!this->readings_.online && !this->readings_.on_battery) {
       return "WAIT";
     }
-    return this->readings_.on_battery ? "OB" : "OL";
+    if (this->readings_.on_battery || this->readings_.discharging) {
+      return "OB";
+    }
+    return "OL";
   }
 
   UpsSignal classify_field(uint16_t usage_page, uint16_t usage, uint32_t collection_mask) const override {
@@ -37,6 +40,12 @@ class Eaton5pxDriver : public UpsDriver {
     }
     if (usage_page == 0x84 && usage == 0xD0) {
       return UpsSignal::AC_PRESENT;
+    }
+    if ((usage_page == 0x84 || usage_page == 0x85) && usage == 0x44) {
+      return UpsSignal::CHARGING;
+    }
+    if ((usage_page == 0x84 || usage_page == 0x85) && usage == 0x45) {
+      return UpsSignal::DISCHARGING;
     }
     return UpsSignal::NONE;
   }
@@ -64,6 +73,18 @@ class Eaton5pxDriver : public UpsDriver {
         this->readings_.has_runtime_seconds = true;
         break;
       case UpsSignal::AC_PRESENT:
+      case UpsSignal::CHARGING:
+        this->readings_.charging = value > 0.5f;
+        this->readings_.has_charging = true;
+        break;
+      case UpsSignal::DISCHARGING:
+        this->readings_.discharging = value > 0.5f;
+        this->readings_.has_discharging = true;
+        if (this->readings_.discharging) {
+          this->readings_.on_battery = true;
+          this->readings_.online = false;
+        }
+        break;
       case UpsSignal::NONE:
         break;
     }
@@ -71,7 +92,9 @@ class Eaton5pxDriver : public UpsDriver {
 
   void set_ac_present(bool ac_present) override {
     this->readings_.online = ac_present;
-    this->readings_.on_battery = !ac_present;
+    if (!this->readings_.has_discharging || !this->readings_.discharging) {
+      this->readings_.on_battery = !ac_present;
+    }
   }
 
   const DriverReadings &readings() const override { return this->readings_; }
