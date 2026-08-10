@@ -2,33 +2,39 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
 
-#include "eaton_5px_driver.h"
+#include "upstream/hidparser.h"
+#include "upstream/mge_map.h"
 
 namespace esphome {
 namespace nut {
 
-struct ReportFieldMapping {
-  uint8_t report_id;
-  uint8_t report_type;
-  uint16_t bit_offset;
-  uint8_t bit_size;
-  bool is_signed;
-  int8_t exponent;
-  uint32_t unit;
-  int32_t logical_min;
-  int32_t logical_max;
-  uint8_t collection_mask;
-  UpsSignal signal;
+// A NUT variable resolved against the parsed HID report descriptor.
+struct ResolvedVar {
+  const char *name;    // NUT variable name, e.g. "input.voltage"
+  const char *format;  // printf format from the mge-hid table
+  int convert;         // 0=plain, 1=Kelvin->Celsius, 2=As->Ah
+  HIDData_t *item;     // resolved descriptor item
+  double value{0};
+  bool valid{false};
+};
+
+// A BOOL status path resolved against the descriptor.
+struct ResolvedBool {
+  const char *status_set;
+  const char *status_clear;
+  HIDData_t *item;
+  bool valid{false};
 };
 
 struct ReportRequest {
   uint8_t report_id;
   uint8_t report_type;
-  uint16_t required_bits;
+  uint16_t length;  // payload bytes (without report ID byte)
 };
 
 class Nut : public Component {
@@ -52,21 +58,21 @@ class Nut : public Component {
 
   void start_usb_host_();
   void discover_usb_devices_(usb_host_client_handle_t client);
-  void serve_nut_client_(int client_fd) const;
-  void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) const;
+  void serve_nut_client_(int client_fd);
+  void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated);
   bool is_ups_name_(const std::string &name) const;
   void send_line_(int client_fd, const std::string &line) const;
   void log_usb_device_(usb_host_client_handle_t client, uint8_t device_address);
   bool capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device,
                                       uint8_t interface_number, uint16_t report_length);
-  bool parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descriptor_length);
+  void resolve_hid_paths_();
   void poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t device);
   bool request_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t interface_number,
                            uint8_t report_type, uint8_t report_id, uint16_t report_length, uint8_t *buffer,
                            size_t *buffer_length);
-  static uint64_t extract_bits_(const uint8_t *data, size_t data_length, uint16_t bit_offset, uint8_t bit_size);
-  static float apply_exponent_(float value, int8_t exponent);
-  void apply_report_data_(uint8_t report_type, uint8_t report_id, const uint8_t *report, size_t report_length);
+  const ResolvedVar *find_var_(const char *name) const;
+  void get_var_value_(int client_fd, const std::string &variable) const;
+  std::string ups_status_() const;
 
   std::string ups_name_;
   std::string username_;
@@ -76,15 +82,11 @@ class Nut : public Component {
   volatile bool usb_host_started_{false};
   uint8_t discovered_device_address_{0};
   uint8_t hid_interface_number_{0};
-  bool report_descriptor_captured_{false};
-  bool has_ac_present_field_{false};
-  uint8_t report_field_count_{0};
-  uint8_t report_request_count_{0};
-  ReportFieldMapping report_fields_[48]{};
-  ReportRequest report_requests_[16]{};
-  ReportFieldMapping parse_selected_fields_[48]{};
-  uint16_t parse_bit_offsets_[4][256]{};
-  Eaton5pxDriver driver_;
+
+  HIDDesc_t *hid_desc_{nullptr};
+  std::vector<ResolvedVar> vars_;
+  std::vector<ResolvedBool> bools_;
+  std::vector<ReportRequest> report_requests_;
 };
 
 }  // namespace nut
