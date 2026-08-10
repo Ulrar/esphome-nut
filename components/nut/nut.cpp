@@ -498,6 +498,10 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
           globals.exponent,
           signal,
       };
+      ESP_LOGD(TAG,
+               "Mapped usage %04X/%04X -> signal=%u report(type=%u id=0x%02X off=%u bits=%u exp=%d mask=0x%02X)",
+               globals.usage_page, usage, static_cast<unsigned>(signal), report_type, globals.report_id, offset,
+               static_cast<unsigned>(bits), static_cast<int>(globals.exponent), collection_mask);
       if (signal == UpsSignal::AC_PRESENT) {
         this->has_ac_present_field_ = true;
       }
@@ -522,6 +526,19 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
     reset_local();
   }
 
+  if (this->report_field_count_ == 0) {
+    ESP_LOGW(TAG, "No UPS-relevant HID fields were mapped from descriptor");
+  }
+  if (this->report_request_count_ == 0) {
+    ESP_LOGW(TAG, "No HID reports selected for polling");
+  } else {
+    for (uint8_t request_index = 0; request_index < this->report_request_count_; request_index++) {
+      const auto &request = this->report_requests_[request_index];
+      ESP_LOGD(TAG, "Polling plan: type=%u id=0x%02X bytes=%u", request.report_type, request.report_id,
+               static_cast<unsigned>((request.required_bits + 7) / 8));
+    }
+  }
+
   return this->report_field_count_ > 0 && this->report_request_count_ > 0;
 }
 
@@ -537,8 +554,11 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
     size_t actual = 0;
     if (!this->request_hid_report_(client, device, this->hid_interface_number_, request.report_type, request.report_id, bytes,
                                    report_buffer, &actual)) {
+      ESP_LOGD(TAG, "GET_REPORT failed for type=%u id=0x%02X", request.report_type, request.report_id);
       continue;
     }
+    ESP_LOGD(TAG, "GET_REPORT ok type=%u id=0x%02X bytes=%u", request.report_type, request.report_id,
+             static_cast<unsigned>(actual));
     any_ok = true;
     this->apply_report_data_(request.report_type, request.report_id, report_buffer, actual);
   }
@@ -555,6 +575,7 @@ bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle
   const esp_err_t allocation_result =
       usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + report_length + 1, 0, &transfer);
   if (allocation_result != ESP_OK) {
+    ESP_LOGD(TAG, "GET_REPORT alloc failed: %s", esp_err_to_name(allocation_result));
     return false;
   }
 
@@ -576,6 +597,7 @@ bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle
 
   const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
   if (submit_result != ESP_OK) {
+    ESP_LOGD(TAG, "GET_REPORT submit failed: %s", esp_err_to_name(submit_result));
     usb_host_transfer_free(transfer);
     return false;
   }
@@ -585,6 +607,7 @@ bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle
   }
 
   if (!context.complete || transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+    ESP_LOGD(TAG, "GET_REPORT incomplete status=%d complete=%d", transfer->status, context.complete);
     usb_host_transfer_free(transfer);
     return false;
   }
