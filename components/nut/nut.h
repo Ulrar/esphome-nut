@@ -70,6 +70,8 @@ class Nut : public Component {
   bool request_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t interface_number,
                            uint8_t report_type, uint8_t report_id, uint16_t report_length, uint8_t *buffer,
                            size_t *buffer_length);
+  bool get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t type, uint8_t index,
+                       uint16_t windex, uint8_t *buffer, uint16_t length, size_t *actual);
   const ResolvedVar *find_var_(const char *name) const;
   void get_var_value_(int client_fd, const std::string &variable) const;
   std::string ups_status_() const;

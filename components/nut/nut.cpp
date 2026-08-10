@@ -214,13 +214,27 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   ESP_LOGI(TAG, "USB device %u: VID=%04X PID=%04X configurations=%u", device_address, descriptor->idVendor,
            descriptor->idProduct, descriptor->bNumConfigurations);
 
-  const usb_config_desc_t *config_descriptor = nullptr;
-  const esp_err_t config_result = usb_host_get_active_config_descriptor(device, &config_descriptor);
-  if (config_result != ESP_OK || config_descriptor == nullptr) {
-    ESP_LOGW(TAG, "Unable to read active USB configuration descriptor: %s", esp_err_to_name(config_result));
+  // Fetch the configuration descriptor with a manual control transfer;
+  // usb_host_get_active_config_descriptor() hangs on this device.
+  uint8_t config_buffer[512]{};
+  size_t config_actual = 0;
+  if (!this->get_descriptor_(client, device, USB_B_DESCRIPTOR_TYPE_CONFIGURATION, 0, 0, config_buffer, 9,
+                             &config_actual) ||
+      config_actual < 9) {
+    ESP_LOGW(TAG, "Unable to read USB configuration descriptor header");
     usb_host_device_close(client, device);
     return;
   }
+  const uint16_t config_total = static_cast<uint16_t>(config_buffer[2]) |
+                                (static_cast<uint16_t>(config_buffer[3]) << 8);
+  if (!this->get_descriptor_(client, device, USB_B_DESCRIPTOR_TYPE_CONFIGURATION, 0, 0, config_buffer,
+                             std::min<uint16_t>(config_total, sizeof(config_buffer)), &config_actual)) {
+    ESP_LOGW(TAG, "Unable to read full USB configuration descriptor (%u bytes)", config_total);
+    usb_host_device_close(client, device);
+    return;
+  }
+  const uint8_t *config_data = config_buffer;
+  const uint16_t config_length = static_cast<uint16_t>(std::min<size_t>(config_actual, sizeof(config_buffer)));
 
   const uint8_t *config_data = reinterpret_cast<const uint8_t *>(config_descriptor);
   const uint16_t config_length = config_descriptor->wTotalLength;
@@ -271,13 +285,13 @@ void Nut::usb_transfer_callback_(usb_transfer_t *transfer) {
   context->complete = true;
 }
 
-bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device,
-                                         uint8_t interface_number, uint16_t report_length) {
+bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t type, uint8_t index,
+                          uint16_t windex, uint8_t *buffer, uint16_t length, size_t *actual) {
   usb_transfer_t *transfer = nullptr;
   const esp_err_t allocation_result =
-      usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + report_length, 0, &transfer);
+      usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + length, 0, &transfer);
   if (allocation_result != ESP_OK) {
-    ESP_LOGW(TAG, "Unable to allocate HID report transfer: %s", esp_err_to_name(allocation_result));
+    ESP_LOGW(TAG, "Unable to allocate descriptor transfer: %s", esp_err_to_name(allocation_result));
     return false;
   }
 
@@ -286,20 +300,20 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_STANDARD |
                         USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
   setup.bRequest = USB_B_REQUEST_GET_DESCRIPTOR;
-  setup.wValue = static_cast<uint16_t>(USB_HID_REPORT_DESCRIPTOR_TYPE << 8);
-  setup.wIndex = interface_number;
-  setup.wLength = report_length;
+  setup.wValue = static_cast<uint16_t>((type << 8) | index);
+  setup.wIndex = windex;
+  setup.wLength = length;
 
   memset(transfer->data_buffer, 0, transfer->data_buffer_size);
   memcpy(transfer->data_buffer, &setup, sizeof(setup));
-  transfer->num_bytes = static_cast<int>(sizeof(usb_setup_packet_t) + report_length);
+  transfer->num_bytes = static_cast<int>(sizeof(usb_setup_packet_t) + length);
   transfer->bEndpointAddress = 0;
   transfer->device_handle = device;
   transfer->callback = usb_transfer_callback_;
   transfer->context = &context;
   const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
   if (submit_result != ESP_OK) {
-    ESP_LOGW(TAG, "Unable to request HID report descriptor: %s", esp_err_to_name(submit_result));
+    ESP_LOGW(TAG, "Unable to request descriptor: %s", esp_err_to_name(submit_result));
     usb_host_transfer_free(transfer);
     return false;
   }
@@ -310,30 +324,39 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
 
   const bool complete = context.complete && transfer->status == USB_TRANSFER_STATUS_COMPLETED;
   if (!complete) {
-    ESP_LOGW(TAG, "HID report descriptor transfer did not complete: status=%d", transfer->status);
+    ESP_LOGW(TAG, "Descriptor transfer did not complete: status=%d", transfer->status);
     usb_host_transfer_free(transfer);
     return false;
   }
 
-  const uint8_t *report = transfer->data_buffer + sizeof(usb_setup_packet_t);
-  size_t transferred_data_bytes = 0;
+  size_t payload = 0;
   if (transfer->actual_num_bytes > static_cast<int>(sizeof(usb_setup_packet_t))) {
-    transferred_data_bytes = static_cast<size_t>(transfer->actual_num_bytes - sizeof(usb_setup_packet_t));
+    payload = static_cast<size_t>(transfer->actual_num_bytes - sizeof(usb_setup_packet_t));
   }
-  const size_t actual_length = std::min(transferred_data_bytes, static_cast<size_t>(report_length));
-  ESP_LOGI(TAG, "HID report descriptor: interface=%u length=%u", interface_number, actual_length);
+  payload = std::min(payload, static_cast<size_t>(length));
+  memcpy(buffer, transfer->data_buffer + sizeof(usb_setup_packet_t), payload);
+  *actual = payload;
+  usb_host_transfer_free(transfer);
+  return true;
+}
 
-  // Copy the descriptor out so the transfer buffer can be freed before
-  // the (heap-hungry) parse step.
-  auto *descriptor_copy = static_cast<uint8_t *>(malloc(actual_length));
+bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device,
+                                         uint8_t interface_number, uint16_t report_length) {
+  auto *descriptor_copy = static_cast<uint8_t *>(malloc(report_length));
   if (descriptor_copy == nullptr) {
-    ESP_LOGW(TAG, "Unable to allocate %u bytes for the HID descriptor copy",
-             static_cast<unsigned>(actual_length));
-    usb_host_transfer_free(transfer);
+    ESP_LOGW(TAG, "Unable to allocate %u bytes for the HID descriptor",
+             static_cast<unsigned>(report_length));
     return false;
   }
-  memcpy(descriptor_copy, report, actual_length);
-  usb_host_transfer_free(transfer);
+  size_t actual_length = 0;
+  const bool ok = this->get_descriptor_(client, device, USB_HID_REPORT_DESCRIPTOR_TYPE, 0, interface_number,
+                                        descriptor_copy, report_length, &actual_length);
+  if (!ok) {
+    free(descriptor_copy);
+    return false;
+  }
+  ESP_LOGI(TAG, "HID report descriptor: interface=%u length=%u", interface_number,
+           static_cast<unsigned>(actual_length));
 
   if (this->hid_desc_ != nullptr) {
     Free_ReportDesc(this->hid_desc_);
