@@ -3,7 +3,7 @@
 #include "ups_driver.h"
 
 namespace esphome {
-namespace eaton_nut {
+namespace nut {
 
 class Eaton5pxDriver : public UpsDriver {
  public:
@@ -13,5 +13,5 @@ class Eaton5pxDriver : public UpsDriver {
   const char *status() const override { return "WAIT"; }
 };
 
-}  // namespace eaton_nut
+}  // namespace nut
 }  // namespace esphome

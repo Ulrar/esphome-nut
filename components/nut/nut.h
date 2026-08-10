@@ -6,12 +6,12 @@
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
 
-#include "drivers/eaton_5px_driver.h"
+#include "eaton_5px_driver.h"
 
 namespace esphome {
-namespace eaton_nut {
+namespace nut {
 
-class EatonNut : public Component {
+class Nut : public Component {
  public:
   void set_ups_name(const std::string &ups_name) { this->ups_name_ = ups_name; }
   void set_username(const std::string &username) { this->username_ = username; }
@@ -45,5 +45,5 @@ class EatonNut : public Component {
   Eaton5pxDriver driver_;
 };
 
-}  // namespace eaton_nut
+}  // namespace nut
 }  // namespace esphome

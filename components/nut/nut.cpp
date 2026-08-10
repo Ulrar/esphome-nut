@@ -1,4 +1,4 @@
-#include "eaton_nut.h"
+#include "nut.h"
 
 #include <algorithm>
 #include <array>
@@ -16,13 +16,13 @@
 #include "usb/usb_types_ch9.h"
 
 namespace esphome {
-namespace eaton_nut {
+namespace nut {
 
-static const char *const TAG = "eaton_nut";
+static const char *const TAG = "nut";
 static constexpr size_t NUT_LINE_LENGTH = 256;
 
 struct UsbClientContext {
-  EatonNut *component;
+  Nut *component;
   usb_host_client_handle_t client;
 };
 
@@ -46,7 +46,7 @@ static std::string after_first_word(const std::string &line) {
   return line.substr(delimiter + 1);
 }
 
-void EatonNut::setup() {
+void Nut::setup() {
   if (this->ups_name_.empty() || this->username_.empty() || this->password_.empty()) {
     ESP_LOGE(TAG, "ups_name, username, and password must not be empty");
     this->mark_failed();
@@ -56,22 +56,22 @@ void EatonNut::setup() {
   this->start_usb_host_();
 
   BaseType_t created = xTaskCreate(
-      nut_server_task_, "eaton_nut", 6144, this, 4, nullptr);
+      nut_server_task_, "nut_server", 6144, this, 4, nullptr);
   if (created != pdPASS) {
     ESP_LOGE(TAG, "Unable to start the NUT server task");
     this->mark_failed();
   }
 }
 
-void EatonNut::dump_config() {
-  ESP_LOGCONFIG(TAG, "Eaton NUT:");
+void Nut::dump_config() {
+  ESP_LOGCONFIG(TAG, "NUT:");
   ESP_LOGCONFIG(TAG, "  UPS name: %s", this->ups_name_.c_str());
   ESP_LOGCONFIG(TAG, "  Description: %s", this->description_.c_str());
   ESP_LOGCONFIG(TAG, "  NUT TCP port: %u", this->port_);
   ESP_LOGCONFIG(TAG, "  USB host: %s", this->usb_host_started_ ? "started" : "not started");
 }
 
-void EatonNut::start_usb_host_() {
+void Nut::start_usb_host_() {
   BaseType_t daemon_created = xTaskCreate(
       usb_daemon_task_, "eaton_usb", 4096, this, 5, nullptr);
   BaseType_t client_created = xTaskCreate(
@@ -85,8 +85,8 @@ void EatonNut::start_usb_host_() {
 
 }
 
-void EatonNut::usb_daemon_task_(void *argument) {
-  auto *component = static_cast<EatonNut *>(argument);
+void Nut::usb_daemon_task_(void *argument) {
+  auto *component = static_cast<Nut *>(argument);
   usb_host_config_t config{};
   config.intr_flags = ESP_INTR_FLAG_LEVEL1;
 
@@ -109,8 +109,8 @@ void EatonNut::usb_daemon_task_(void *argument) {
   }
 }
 
-void EatonNut::usb_client_task_(void *argument) {
-  auto *component = static_cast<EatonNut *>(argument);
+void Nut::usb_client_task_(void *argument) {
+  auto *component = static_cast<Nut *>(argument);
 
   // Let the daemon own USB library installation before registering this client.
   for (uint8_t attempts = 0; attempts < 20 && !component->usb_host_started_; attempts++) {
@@ -145,14 +145,14 @@ void EatonNut::usb_client_task_(void *argument) {
   }
 }
 
-void EatonNut::usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument) {
+void Nut::usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument) {
   auto *context = static_cast<UsbClientContext *>(argument);
   if (event->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
     context->component->log_usb_device_(context->client, event->new_dev.address);
   }
 }
 
-void EatonNut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_address) const {
+void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_address) const {
   usb_device_handle_t device = nullptr;
   const esp_err_t open_result = usb_host_device_open(client, device_address, &device);
   if (open_result != ESP_OK) {
@@ -174,8 +174,8 @@ void EatonNut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_a
   usb_host_device_close(client, device);
 }
 
-void EatonNut::nut_server_task_(void *argument) {
-  auto *component = static_cast<EatonNut *>(argument);
+void Nut::nut_server_task_(void *argument) {
+  auto *component = static_cast<Nut *>(argument);
 
   const int server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
   if (server_fd < 0) {
@@ -211,7 +211,7 @@ void EatonNut::nut_server_task_(void *argument) {
   }
 }
 
-void EatonNut::serve_nut_client_(int client_fd) const {
+void Nut::serve_nut_client_(int client_fd) const {
   bool authenticated = false;
   std::array<char, NUT_LINE_LENGTH> buffer{};
   std::string pending;
@@ -235,16 +235,16 @@ void EatonNut::serve_nut_client_(int client_fd) const {
   }
 }
 
-bool EatonNut::is_ups_name_(const std::string &name) const {
+bool Nut::is_ups_name_(const std::string &name) const {
   return name == this->ups_name_;
 }
 
-void EatonNut::send_line_(int client_fd, const std::string &line) const {
+void Nut::send_line_(int client_fd, const std::string &line) const {
   const std::string message = line + "\n";
   send(client_fd, message.c_str(), message.size(), 0);
 }
 
-void EatonNut::handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) const {
+void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) const {
   const std::string command = first_word(line);
   const std::string arguments = after_first_word(line);
 
@@ -272,7 +272,7 @@ void EatonNut::handle_nut_command_(int client_fd, const std::string &line, bool 
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.mfr \"" + this->driver_.manufacturer() + "\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.model \"" + this->driver_.model() + "\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.firmware \"" + this->driver_.firmware() + "\"");
-    this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"eaton_nut\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"nut\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
     this->send_line_(client_fd, "END LIST VAR " + this->ups_name_);
   } else if (command == "GET") {
@@ -289,7 +289,7 @@ void EatonNut::handle_nut_command_(int client_fd, const std::string &line, bool 
     } else if (variable == "device.firmware") {
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.firmware \"" + this->driver_.firmware() + "\"");
     } else if (variable == "driver.name") {
-      this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"eaton_nut\"");
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"nut\"");
     } else if (variable == "ups.status") {
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
     } else {
@@ -305,5 +305,5 @@ void EatonNut::handle_nut_command_(int client_fd, const std::string &line, bool 
   }
 }
 
-}  // namespace eaton_nut
+}  // namespace nut
 }  // namespace esphome

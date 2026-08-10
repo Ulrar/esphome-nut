@@ -29,9 +29,9 @@ external_components:
   - source:
       type: local
       path: ../components
-    components: [eaton_nut]
+    components: [nut]
 
-eaton_nut:
+nut:
   ups_name: eaton
   username: !secret nut_username
   password: !secret nut_password

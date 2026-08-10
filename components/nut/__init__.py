@@ -10,16 +10,16 @@ CONF_PASSWORD = "password"
 CONF_DESCRIPTION = "description"
 CONF_PORT = "port"
 
-eaton_nut_ns = cg.esphome_ns.namespace("eaton_nut")
-EatonNut = eaton_nut_ns.class_("EatonNut", cg.Component)
+nut_ns = cg.esphome_ns.namespace("nut")
+Nut = nut_ns.class_("Nut", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(EatonNut),
+        cv.GenerateID(): cv.declare_id(Nut),
         cv.Required(CONF_UPS_NAME): cv.validate_id_name,
         cv.Required(CONF_USERNAME): cv.string_strict,
         cv.Required(CONF_PASSWORD): cv.string_strict,
-        cv.Optional(CONF_DESCRIPTION, default="Eaton 5PX USB HID"): cv.string_strict,
+        cv.Optional(CONF_DESCRIPTION, default="USB HID UPS"): cv.string_strict,
         cv.Optional(CONF_PORT, default=3493): cv.port,
     }
 ).extend(cv.COMPONENT_SCHEMA)

@@ -1,8 +1,8 @@
 # ESPHome Eaton 5PX NUT server
 
-An ESPHome external component intended to expose an Eaton 5PX 1500i RT2U G2
-as a NUT server over TCP/3493. It is designed for an ESP32-S3 using the
-native USB-OTG interface in host mode.
+An ESPHome external component intended to expose USB HID UPS devices as NUT
+servers over TCP/3493. It is designed for an ESP32-S3 using the native USB-OTG
+interface in host mode. The Eaton 5PX 1500i RT2U G2 is the initial target.
 
 ## Current milestone
 
@@ -37,7 +37,7 @@ external_components:
       type: git
       url: https://github.com/YOUR_ACCOUNT/esp32-nut
       ref: main
-    components: [eaton_nut]
+    components: [nut]
 ```
 
 For repeatable production builds, replace `main` with a tag or commit SHA.

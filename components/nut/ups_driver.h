@@ -1,7 +1,7 @@
 #pragma once
 
 namespace esphome {
-namespace eaton_nut {
+namespace nut {
 
 class UpsDriver {
  public:
@@ -13,5 +13,5 @@ class UpsDriver {
   virtual const char *status() const = 0;
 };
 
-}  // namespace eaton_nut
+}  // namespace nut
 }  // namespace esphome
