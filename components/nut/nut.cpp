@@ -198,18 +198,29 @@ void Nut::discover_usb_devices_(usb_host_client_handle_t client) {
 }
 
 void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_address) {
-  usb_device_handle_t device = nullptr;
-  const esp_err_t open_result = usb_host_device_open(client, device_address, &device);
-  if (open_result != ESP_OK) {
-    ESP_LOGW(TAG, "Unable to open USB device %u: %s", device_address, esp_err_to_name(open_result));
+  // Skip devices we already hold open.
+  if (this->ups_device_ != nullptr && device_address == this->discovered_device_address_ &&
+      this->hid_desc_ != nullptr) {
+    // Already captured; just poll.
+    this->poll_hid_reports_(client, this->ups_device_);
     return;
+  }
+
+  usb_device_handle_t device = this->ups_device_;
+  if (device == nullptr) {
+    const esp_err_t open_result = usb_host_device_open(client, device_address, &device);
+    if (open_result != ESP_OK) {
+      ESP_LOGW(TAG, "Unable to open USB device %u: %s", device_address, esp_err_to_name(open_result));
+      return;
+    }
+    this->ups_device_ = device;
+    this->discovered_device_address_ = device_address;
   }
 
   const usb_device_desc_t *descriptor = nullptr;
   const esp_err_t descriptor_result = usb_host_get_device_descriptor(device, &descriptor);
   if (descriptor_result != ESP_OK || descriptor == nullptr) {
     ESP_LOGW(TAG, "Unable to read USB device descriptor: %s", esp_err_to_name(descriptor_result));
-    usb_host_device_close(client, device);
     return;
   }
 
@@ -242,7 +253,6 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
                              &config_actual) ||
       config_actual < 9) {
     ESP_LOGW(TAG, "Unable to read USB configuration descriptor header");
-    usb_host_device_close(client, device);
     return;
   }
   const uint16_t config_total = static_cast<uint16_t>(config_buffer[2]) |
@@ -250,7 +260,6 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   if (!this->get_descriptor_(client, device, USB_B_DESCRIPTOR_TYPE_CONFIGURATION, 0, 0, config_buffer,
                              std::min<uint16_t>(config_total, sizeof(config_buffer)), &config_actual)) {
     ESP_LOGW(TAG, "Unable to read full USB configuration descriptor (%u bytes)", config_total);
-    usb_host_device_close(client, device);
     return;
   }
   const uint8_t *config_data = config_buffer;
@@ -293,7 +302,7 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
       this->poll_hid_reports_(client, device);
     }
   }
-  usb_host_device_close(client, device);
+  // Device stays open for the lifetime of the attachment.
 }
 
 void Nut::usb_transfer_callback_(usb_transfer_t *transfer) {
