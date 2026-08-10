@@ -1,0 +1,52 @@
+substitutions:
+  name: eaton-5px-nut
+  friendly_name: Eaton 5PX NUT
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2025.10.0
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+ota:
+  - platform: esphome
+
+# USB host consumes the S3's native USB PHY on GPIO19/GPIO20.
+# Keep logging on UART0 so it does not contend with USB_SERIAL_JTAG.
+# Use VERBOSE only for short-term debugging; INFO is fine for daily use.
+logger:
+  level: INFO
+  hardware_uart: UART0
+
+debug:
+
+sensor:
+  - platform: debug
+    free:
+      name: ESP Free Heap
+    block:
+      name: ESP Max Heap Block
+    loop_time:
+      name: ESP Loop Time
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/Ulrar/esphome-nut
+      ref: main
+    refresh: 0s
+    components: [nut]
+
+nut:
+  ups_name: eaton
+  username: !secret nut_username
+  password: !secret nut_password
