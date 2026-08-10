@@ -255,7 +255,9 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
     if (this->hid_desc_ == nullptr || this->discovered_device_address_ != device_address) {
       this->discovered_device_address_ = device_address;
       this->hid_interface_number_ = hid_interface;
-      this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
+      ESP_LOGI(TAG, "Capturing HID report descriptor: interface=%u length=%u", hid_interface, report_length);
+      const bool ok = this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
+      ESP_LOGI(TAG, "HID capture %s", ok ? "succeeded" : "failed");
     }
     if (this->hid_desc_ != nullptr) {
       this->poll_hid_reports_(client, device);
@@ -328,6 +330,7 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   this->hid_desc_ = Parse_ReportDesc(const_cast<uint8_t *>(report), actual_length);
   usb_host_transfer_free(transfer);
 
+  ESP_LOGI(TAG, "HID report descriptor captured: %u bytes, parsing", static_cast<unsigned>(actual_length));
   if (this->hid_desc_ == nullptr) {
     ESP_LOGW(TAG, "Upstream HID parser rejected the report descriptor");
     return false;
