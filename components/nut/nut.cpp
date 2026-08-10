@@ -202,9 +202,9 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   ESP_LOGI(TAG, "USB device %u: VID=%04X PID=%04X configurations=%u", device_address, descriptor->idVendor,
            descriptor->idProduct, descriptor->bNumConfigurations);
 
-  if (this->discovered_device_address_ == device_address && this->report_descriptor_captured_) {
-    usb_host_device_close(client, device);
-    return;
+  const bool already_captured = this->discovered_device_address_ == device_address && this->report_descriptor_captured_;
+  if (already_captured) {
+    ESP_LOGD(TAG, "Re-reading HID report descriptor for diagnostics");
   }
 
   const usb_config_desc_t *config_descriptor = nullptr;
