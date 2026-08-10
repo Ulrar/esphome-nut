@@ -676,7 +676,10 @@ void Nut::apply_report_data_(uint8_t report_type, uint8_t report_id, const uint8
       signed_raw |= (~0ULL << field.bit_size);
     }
     int8_t effective_exponent = field.exponent;
-    if ((field.signal == UpsSignal::INPUT_VOLTAGE || field.signal == UpsSignal::OUTPUT_VOLTAGE) && field.unit != 0) {
+    if ((field.signal == UpsSignal::INPUT_VOLTAGE || field.signal == UpsSignal::OUTPUT_VOLTAGE ||
+         field.signal == UpsSignal::OUTPUT_APPARENT_POWER || field.signal == UpsSignal::OUTPUT_ACTIVE_POWER ||
+         field.signal == UpsSignal::BATTERY_VOLTAGE) &&
+        field.unit != 0) {
       // HID power-voltage units encode an additional base-10 scale in unit metadata.
       // NUT effectively normalizes by subtracting that built-in factor.
       effective_exponent = static_cast<int8_t>(effective_exponent - 7);
