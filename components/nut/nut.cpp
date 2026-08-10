@@ -485,6 +485,48 @@ void Nut::resolve_hid_paths_() {
     ESP_LOGD(TAG, "Mapped status %s", entry.hid_path);
   }
 
+  // Instant commands, values from upstream mge-hid.c HU_TYPE_CMD entries.
+  this->commands_.clear();
+  static const struct {
+    const char *name;
+    const char *hid_path;
+    long value;
+  } COMMANDS[] = {
+      {"test.battery.start.quick", "UPS.BatterySystem.Battery.Test", 1},
+      {"test.battery.start.deep", "UPS.BatterySystem.Battery.Test", 2},
+      {"test.battery.stop", "UPS.BatterySystem.Battery.Test", 3},
+      {"load.off.delay", "UPS.PowerSummary.DelayBeforeShutdown", 20},   // DEFAULT_OFFDELAY
+      {"load.on.delay", "UPS.PowerSummary.DelayBeforeStartup", 30},     // DEFAULT_ONDELAY
+      {"shutdown.stop", "UPS.PowerSummary.DelayBeforeShutdown", -1},
+      {"shutdown.reboot", "UPS.PowerSummary.DelayBeforeReboot", 10},
+      {"beeper.off", "UPS.PowerSummary.AudibleAlarmControl", 1},
+      {"beeper.on", "UPS.PowerSummary.AudibleAlarmControl", 2},
+      {"beeper.mute", "UPS.PowerSummary.AudibleAlarmControl", 3},
+      {"beeper.mute", "UPS.BatterySystem.Battery.AudibleAlarmControl", 3},
+      {"beeper.disable", "UPS.PowerSummary.AudibleAlarmControl", 1},
+      {"beeper.disable", "UPS.BatterySystem.Battery.AudibleAlarmControl", 1},
+      {"beeper.enable", "UPS.PowerSummary.AudibleAlarmControl", 2},
+      {"beeper.enable", "UPS.BatterySystem.Battery.AudibleAlarmControl", 2},
+  };
+  for (const auto &entry : COMMANDS) {
+    HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
+    if (item == nullptr) {
+      continue;
+    }
+    bool already = false;
+    for (const auto &cmd : this->commands_) {
+      if (strcmp(cmd.name, entry.name) == 0) {
+        already = true;
+        break;
+      }
+    }
+    if (already) {
+      continue;
+    }
+    this->commands_.push_back({entry.name, entry.hid_path, entry.value, item});
+    ESP_LOGI(TAG, "Mapped command %s -> %s (report 0x%02X)", entry.name, entry.hid_path, item->ReportID);
+  }
+
   // Poll plan: one request per (report ID, report type) covering all
   // resolved items; report length comes from the parsed descriptor.
   auto add_request = [&](const HIDData_t *item) {
@@ -509,6 +551,7 @@ void Nut::resolve_hid_paths_() {
 }
 
 void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t device) {
+  this->run_pending_commands_(client, device);
   if (this->report_requests_.empty()) {
     return;
   }
@@ -623,6 +666,81 @@ bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle
   *buffer_length = payload;
   usb_host_transfer_free(transfer);
   return payload > 0;
+}
+
+bool Nut::send_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, const HIDData_t *item,
+                           long value) {
+  const uint16_t length = static_cast<uint16_t>(this->hid_desc_->replen[item->ReportID] + 1);
+  usb_transfer_t *transfer = nullptr;
+  if (usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + length, 0, &transfer) != ESP_OK) {
+    return false;
+  }
+
+  // Build the report: report ID byte, then the field at its bit offset.
+  uint8_t *payload = transfer->data_buffer + sizeof(usb_setup_packet_t);
+  memset(payload, 0, length);
+  payload[0] = item->ReportID;
+  SetValue(item, payload, value);
+
+  TransferContext context{false};
+  usb_setup_packet_t setup{};
+  setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_CLASS |
+                        USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+  setup.bRequest = 0x09;  // SET_REPORT
+  setup.wValue = static_cast<uint16_t>((HID_REPORT_TYPE_FEATURE << 8) | item->ReportID);
+  setup.wIndex = this->hid_interface_number_;
+  setup.wLength = length;
+
+  memcpy(transfer->data_buffer, &setup, sizeof(setup));
+  transfer->num_bytes = static_cast<int>(sizeof(usb_setup_packet_t) + length);
+  transfer->bEndpointAddress = 0;
+  transfer->device_handle = device;
+  transfer->callback = usb_transfer_callback_;
+  transfer->context = &context;
+
+  const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
+  if (submit_result != ESP_OK) {
+    usb_host_transfer_free(transfer);
+    return false;
+  }
+  for (uint8_t attempts = 0; attempts < 10 && !context.complete; attempts++) {
+    usb_host_client_handle_events(client, pdMS_TO_TICKS(50));
+  }
+  const bool ok = context.complete && transfer->status == USB_TRANSFER_STATUS_COMPLETED;
+  usb_host_transfer_free(transfer);
+  return ok;
+}
+
+void Nut::run_pending_commands_(usb_host_client_handle_t client, usb_device_handle_t device) {
+  const int index = this->pending_command_;
+  if (index < 0 || index >= static_cast<int>(this->commands_.size())) {
+    return;
+  }
+  const auto &command = this->commands_[index];
+  ESP_LOGI(TAG, "Executing command %s (value %ld)", command.name, command.value);
+  this->command_result_ = this->send_hid_report_(client, device, command.item, command.value) ? 0 : 1;
+  this->pending_command_ = -1;
+}
+
+void Nut::execute_instant_command_(int client_fd, const std::string &command) {
+  for (size_t i = 0; i < this->commands_.size(); i++) {
+    if (command == this->commands_[i].name) {
+      this->command_result_ = 0;
+      this->pending_command_ = static_cast<int>(i);
+      // Wait for the USB task to pick it up (runs on the next poll cycle).
+      for (uint8_t attempts = 0; attempts < 40 && this->pending_command_ >= 0; attempts++) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+      if (this->pending_command_ >= 0) {
+        this->pending_command_ = -1;
+        this->send_line_(client_fd, "ERR TEMPORARY-FAILURE");
+        return;
+      }
+      this->send_line_(client_fd, this->command_result_ == 0 ? "OK" : "ERR TEMPORARY-FAILURE");
+      return;
+    }
+  }
+  this->send_line_(client_fd, "ERR CMD-NOT-SUPPORTED");
 }
 
 const ResolvedVar *Nut::find_var_(const char *name) const {
@@ -811,9 +929,22 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     this->get_var_value_(client_fd, arguments.substr(expected_prefix.size()));
   } else if (line == "LIST CMD " + this->ups_name_) {
     this->send_line_(client_fd, "BEGIN LIST CMD " + this->ups_name_);
+    for (const auto &cmd : this->commands_) {
+      this->send_line_(client_fd, "CMD " + this->ups_name_ + " " + cmd.name);
+    }
     this->send_line_(client_fd, "END LIST CMD " + this->ups_name_);
   } else if (command == "INSTCMD") {
-    this->send_line_(client_fd, *authenticated ? "ERR CMD-NOT-SUPPORTED" : "ERR ACCESS-DENIED");
+    if (!*authenticated) {
+      this->send_line_(client_fd, "ERR ACCESS-DENIED");
+      return;
+    }
+    // INSTCMD <upsname> <command>
+    const std::string expected_prefix = this->ups_name_ + " ";
+    if (arguments.rfind(expected_prefix, 0) != 0) {
+      this->send_line_(client_fd, "ERR CMD-NOT-SUPPORTED");
+      return;
+    }
+    this->execute_instant_command_(client_fd, arguments.substr(expected_prefix.size()));
   } else {
     this->send_line_(client_fd, "ERR UNKNOWN-COMMAND");
   }

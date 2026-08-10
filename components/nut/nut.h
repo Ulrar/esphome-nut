@@ -39,6 +39,15 @@ struct ReportRequest {
   uint16_t length;  // payload bytes (without report ID byte)
 };
 
+// Instant command resolved against the descriptor (subset of the
+// HU_TYPE_CMD entries in upstream mge-hid.c).
+struct InstantCommand {
+  const char *name;
+  const char *hid_path;
+  long value;
+  HIDData_t *item;
+};
+
 class Nut : public Component {
  public:
   void set_ups_name(const std::string &ups_name) { this->ups_name_ = ups_name; }
@@ -72,6 +81,10 @@ class Nut : public Component {
   bool request_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t interface_number,
                            uint8_t report_type, uint8_t report_id, uint16_t report_length, uint8_t *buffer,
                            size_t *buffer_length);
+  bool send_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, const HIDData_t *item,
+                        long value);
+  void run_pending_commands_(usb_host_client_handle_t client, usb_device_handle_t device);
+  void execute_instant_command_(int client_fd, const std::string &command);
   bool get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t type, uint8_t index,
                        uint16_t windex, uint8_t *buffer, uint16_t length, size_t *actual);
   bool get_string_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t index,
@@ -93,6 +106,9 @@ class Nut : public Component {
   HIDDesc_t *hid_desc_{nullptr};
   uint8_t *raw_desc_{nullptr};
   size_t raw_desc_len_{0};
+  std::vector<InstantCommand> commands_;
+  volatile int pending_command_{-1};  // index into commands_, -1 = none
+  volatile int command_result_{0};    // 0 = idle/ok, 1 = failed
   std::vector<ResolvedVar> vars_;
   std::vector<ResolvedBool> bools_;
   std::vector<ReportRequest> report_requests_;
