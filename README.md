@@ -62,16 +62,38 @@ LAN/VLAN and use a unique long password.
 
 ## Known limitations
 
-- The 5PX G2 HID descriptor does not expose live `input.voltage` /
-  `input.current` / `input.frequency` (only the nominal `Flow.[1].Config*`
-  values), nor `AudibleAlarmControl` — so no live input metrics and no
-  beeper commands, matching upstream `usbhid-ups` on the same hardware.
-- Outlet groups are named (`Outlet.[1..3].iDesignator`) but expose no
-  switch/delay control paths over USB HID. Eaton's own software likely uses
-  the vendor COPIBridge reports (0xFE/0xFF); reverse-engineering those is
-  possible future work.
-- Instant commands are executed without interlock checks — `load.off.delay`
-  and `shutdown.*` really do power down the load.
+- Instant commands are executed without interlock checks — `load.off.delay`,
+  `shutdown.*` and the `outlet.N.load.*` commands really do power down the
+  load, and there is no tracking (`OK TRACKING`) support.
+
+## Differences from upstream NUT
+
+The goal is behavioral parity with `usbhid-ups` + `upsd` on this hardware,
+but the ESP port carries some deliberate adaptations. Keeping them listed
+here so they can be upstreamed or reworked:
+
+- **HID report descriptor index**: Eaton 5PX G2 (VID 0463, bcdDevice 0x0202)
+  exposes a reduced descriptor at index 0 and the full one (input metrics,
+  outlet telemetry, command paths) at index 1. The component tries both and
+  keeps whichever parses to more items; Linux NUT gets this via
+  `hid_desc_index=1` driver logic.
+- **String/enum conversions** (`beeper_info`, `test_read_info`, yes/no,
+  on/off) are reimplemented inline in `nut.cpp` rather than vendored
+  `usbhid-ups.c` lookup tables, since those depend on NUT's `dstate`
+  machinery.
+- **ABM charger status** (`battery.charger.status` from
+  `Charger.Mode`/`Charger.Status`) is synthesized in `nut.cpp` instead of
+  using upstream's `eaton_abm_*` state machine.
+- **`outlet.N.load.cycle`** is implemented as DelayBeforeShutdown(0)
+  followed by DelayBeforeStartup(0) — NUT convention for power-cycle — and
+  is listed so Home Assistant discovers its per-outlet restart button.
+- **NUT protocol** is a subset: `LIST UPS/VAR/CMD`, `GET VAR/CMDDESC`,
+  `INSTCMD`, `USERNAME/PASSWORD/LOGIN/LOGOUT`, `VER/PING`, plus a
+  non-standard `DUMPDESC` debug command. No TLS, no `SET`, no tracking.
+- The device handle is kept open after claiming and all control transfers
+  are completed via timeout + semaphore; upstream can freely open/close.
+
+## A note on authorship
 
 ## A note on authorship
 

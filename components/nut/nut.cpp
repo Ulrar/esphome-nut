@@ -549,6 +549,14 @@ void Nut::resolve_hid_paths_() {
       {"ups.beeper.status", "UPS.BatterySystem.Battery.AudibleAlarmControl", 6},
       {"ups.beeper.status", "UPS.PowerSummary.AudibleAlarmControl", 6},
       {"ups.beeper.status", "UPS.AudibleAlarmControl", 6},
+      // Outlet switchability/state, from upstream mge-hid outlet page.
+      {"outlet.switchable", "UPS.OutletSystem.Outlet.[1].PresentStatus.Switchable", 7},
+      {"outlet.1.switchable", "UPS.OutletSystem.Outlet.[2].PresentStatus.Switchable", 7},
+      {"outlet.2.switchable", "UPS.OutletSystem.Outlet.[3].PresentStatus.Switchable", 7},
+      {"outlet.3.switchable", "UPS.OutletSystem.Outlet.[4].PresentStatus.Switchable", 7},
+      {"outlet.1.status", "UPS.OutletSystem.Outlet.[2].PresentStatus.SwitchOn/Off", 8},
+      {"outlet.2.status", "UPS.OutletSystem.Outlet.[3].PresentStatus.SwitchOn/Off", 8},
+      {"outlet.3.status", "UPS.OutletSystem.Outlet.[4].PresentStatus.SwitchOn/Off", 8},
   };
   for (const auto &entry : ENUM_VARS) {
     HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
@@ -625,10 +633,13 @@ void Nut::resolve_hid_paths_() {
       // Outlet group switching (paths only exist on multi-outlet units).
       {"outlet.1.load.off", "UPS.OutletSystem.Outlet.[2].DelayBeforeShutdown", 0},
       {"outlet.1.load.on", "UPS.OutletSystem.Outlet.[2].DelayBeforeStartup", 0},
+      {"outlet.1.load.cycle", "UPS.OutletSystem.Outlet.[2].DelayBeforeShutdown", 0},
       {"outlet.2.load.off", "UPS.OutletSystem.Outlet.[3].DelayBeforeShutdown", 0},
       {"outlet.2.load.on", "UPS.OutletSystem.Outlet.[3].DelayBeforeStartup", 0},
+      {"outlet.2.load.cycle", "UPS.OutletSystem.Outlet.[3].DelayBeforeShutdown", 0},
       {"outlet.3.load.off", "UPS.OutletSystem.Outlet.[4].DelayBeforeShutdown", 0},
       {"outlet.3.load.on", "UPS.OutletSystem.Outlet.[4].DelayBeforeStartup", 0},
+      {"outlet.3.load.cycle", "UPS.OutletSystem.Outlet.[4].DelayBeforeShutdown", 0},
       {"bypass.start", "UPS.PowerConverter.Input.[2].SwitchOnControl", 1},
       {"bypass.stop", "UPS.PowerConverter.Input.[2].SwitchOffControl", 1},
       {"experimental.ecomode.start", "UPS.PowerConverter.Input.[5].Switchable", 1},
@@ -718,6 +729,18 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
             strlcpy(var.text, BEEPER_STATES[logical], sizeof(var.text));
             var.valid = true;
           }
+          continue;
+        }
+        if (var.convert == 7) {
+          // yes_no_info lookup (usbhid-ups.c).
+          strlcpy(var.text, logical != 0 ? "yes" : "no", sizeof(var.text));
+          var.valid = true;
+          continue;
+        }
+        if (var.convert == 8) {
+          // on_off_info lookup (usbhid-ups.c).
+          strlcpy(var.text, logical != 0 ? "on" : "off", sizeof(var.text));
+          var.valid = true;
           continue;
         }
         if (var.convert == 5) {
@@ -901,7 +924,17 @@ void Nut::run_pending_commands_(usb_host_client_handle_t client, usb_device_hand
   }
   const auto &command = this->commands_[index];
   ESP_LOGI(TAG, "Executing command %s (value %ld)", command.name, command.value);
-  this->command_result_ = this->send_hid_report_(client, device, command.item, command.value) ? 0 : 1;
+  bool ok = this->send_hid_report_(client, device, command.item, command.value);
+  // outlet.N.load.cycle = off then on (NUT convention). The mapped path is
+  // DelayBeforeShutdown; the matching DelayBeforeStartup turns it back on.
+  if (ok && strstr(command.name, ".load.cycle") != nullptr) {
+    const std::string on_path = std::string(command.hid_path).replace(
+        std::string(command.hid_path).find("DelayBeforeShutdown"), std::string("DelayBeforeShutdown").size(),
+        "DelayBeforeStartup");
+    HIDData_t *on_item = nut_hid_find_object(this->hid_desc_, on_path.c_str());
+    ok = on_item != nullptr && this->send_hid_report_(client, device, on_item, 0);
+  }
+  this->command_result_ = ok ? 0 : 1;
   this->pending_command_ = -1;
 }
 
@@ -1179,10 +1212,13 @@ const char *Nut::command_description_(const std::string &name) const {
       {"beeper.enable", "Enable the UPS beeper"},
       {"outlet.1.load.off", "Turn off outlet 1 immediately"},
       {"outlet.1.load.on", "Turn on outlet 1 immediately"},
+      {"outlet.1.load.cycle", "Power cycle outlet 1"},
       {"outlet.2.load.off", "Turn off outlet 2 immediately"},
       {"outlet.2.load.on", "Turn on outlet 2 immediately"},
+      {"outlet.2.load.cycle", "Power cycle outlet 2"},
       {"outlet.3.load.off", "Turn off outlet 3 immediately"},
       {"outlet.3.load.on", "Turn on outlet 3 immediately"},
+      {"outlet.3.load.cycle", "Power cycle outlet 3"},
       {"bypass.start", "Put the UPS in bypass mode"},
       {"bypass.stop", "Take the UPS out of bypass mode"},
       {"experimental.ecomode.start", "Start ECO mode"},
