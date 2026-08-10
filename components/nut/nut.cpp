@@ -172,11 +172,11 @@ void Nut::usb_client_task_(void *argument) {
 void Nut::usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument) {
   auto *context = static_cast<UsbClientContext *>(argument);
   ESP_LOGD(TAG, "USB client event: %d", event->event);
-  // Ignore hot-plug events until the startup delay has elapsed, so the
-  // initial capture/parse stays visible to remote log clients.
-  if (event->event == USB_HOST_CLIENT_EVENT_NEW_DEV && context->component->usb_events_ready_) {
-    context->component->log_usb_device_(context->client, event->new_dev.address);
-  }
+  // The periodic scan in usb_client_task_ discovers devices; the event
+  // callback must not open/close the device concurrently (assert in
+  // usb_host_device_close when the scan already holds it).
+  (void) context;
+  (void) event;
 }
 
 void Nut::discover_usb_devices_(usb_host_client_handle_t client) {
@@ -191,12 +191,9 @@ void Nut::discover_usb_devices_(usb_host_client_handle_t client) {
   }
 
   for (int index = 0; index < device_count; index++) {
-    const uint8_t device_address = addresses[index];
-    usb_device_handle_t device = nullptr;
-    if (usb_host_device_open(client, device_address, &device) == ESP_OK) {
-      usb_host_device_close(client, device);
-      this->log_usb_device_(client, device_address);
-    }
+    // log_usb_device_ opens and closes the device itself; do not open it
+    // here first (double open/close asserts in usb_host_device_close).
+    this->log_usb_device_(client, addresses[index]);
   }
 }
 
