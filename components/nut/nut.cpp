@@ -902,56 +902,75 @@ void Nut::nut_server_task_(void *argument) {
   }
 
   ESP_LOGI(TAG, "NUT server listening on TCP/%u", component->port_);
+
+  // Single-task select() multiplexing: one thread owns all sockets, so
+  // long-lived clients (upsmon) coexist with one-shot ones (upsc) without
+  // concurrent lwIP/W5500 transmit paths, which crash on this stack.
+  struct ClientState {
+    int fd{-1};
+    bool authenticated{false};
+    std::string pending;
+  };
+  ClientState clients[4];
+  std::array<char, NUT_LINE_LENGTH> buffer{};
+
   while (true) {
-    sockaddr_in client_address{};
-    socklen_t client_address_length = sizeof(client_address);
-    const int client_fd = accept(server_fd, reinterpret_cast<sockaddr *>(&client_address), &client_address_length);
-    if (client_fd < 0) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(server_fd, &read_fds);
+    int max_fd = server_fd;
+    for (auto &client : clients) {
+      if (client.fd >= 0) {
+        FD_SET(client.fd, &read_fds);
+        max_fd = std::max(max_fd, client.fd);
+      }
+    }
+
+    if (select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr) < 0) {
       continue;
     }
-    ESP_LOGI(TAG, "NUT client connected (fd=%d)", client_fd);
-    // Serve each connection on its own task so long-lived clients
-    // (upsmon) don't block others. The arg must outlive the task start.
-    auto *args = new (std::nothrow) std::pair<Nut *, int>(component, client_fd);
-    if (args == nullptr ||
-        xTaskCreate(nut_client_task_, "nut_client", 6144, args, 4, nullptr) != pdPASS) {
-      delete args;
-      close(client_fd);
-      ESP_LOGW(TAG, "Unable to spawn NUT client task; connection dropped");
-    }
-  }
-}
 
-void Nut::nut_client_task_(void *argument) {
-  auto *args = static_cast<std::pair<Nut *, int> *>(argument);
-  Nut *component = args->first;
-  const int client_fd = args->second;
-  delete args;
-  component->serve_nut_client_(client_fd);
-  ESP_LOGI(TAG, "NUT client disconnected (fd=%d)", client_fd);
-  close(client_fd);
-  vTaskDelete(nullptr);
-}
-
-void Nut::serve_nut_client_(int client_fd) {
-  bool authenticated = false;
-  std::array<char, NUT_LINE_LENGTH> buffer{};
-  std::string pending;
-
-  while (true) {
-    const ssize_t length = recv(client_fd, buffer.data(), buffer.size() - 1, 0);
-    if (length <= 0) {
-      return;
+    if (FD_ISSET(server_fd, &read_fds)) {
+      const int client_fd = accept(server_fd, nullptr, nullptr);
+      if (client_fd >= 0) {
+        bool accepted = false;
+        for (auto &client : clients) {
+          if (client.fd < 0) {
+            client.fd = client_fd;
+            client.authenticated = false;
+            client.pending.clear();
+            accepted = true;
+            ESP_LOGI(TAG, "NUT client connected (fd=%d)", client_fd);
+            break;
+          }
+        }
+        if (!accepted) {
+          ESP_LOGW(TAG, "NUT connection slots full; dropping fd=%d", client_fd);
+          close(client_fd);
+        }
+      }
     }
 
-    buffer[static_cast<size_t>(length)] = '\0';
-    pending.append(buffer.data(), static_cast<size_t>(length));
-    size_t line_end = 0;
-    while ((line_end = pending.find('\n')) != std::string::npos) {
-      const std::string line = trim_crlf(pending.substr(0, line_end));
-      pending.erase(0, line_end + 1);
-      if (!line.empty()) {
-        this->handle_nut_command_(client_fd, line, &authenticated);
+    for (auto &client : clients) {
+      if (client.fd < 0 || !FD_ISSET(client.fd, &read_fds)) {
+        continue;
+      }
+      const ssize_t length = recv(client.fd, buffer.data(), buffer.size() - 1, 0);
+      if (length <= 0) {
+        ESP_LOGI(TAG, "NUT client disconnected (fd=%d)", client.fd);
+        close(client.fd);
+        client.fd = -1;
+        continue;
+      }
+      buffer[static_cast<size_t>(length)] = '\0';
+      client.pending.append(buffer.data(), static_cast<size_t>(length));
+      size_t line_end = 0;
+      while ((line_end = client.pending.find('\n')) != std::string::npos) {
+        const std::string line = trim_crlf(client.pending.substr(0, line_end));
+        client.pending.erase(0, line_end + 1);
+        if (!line.empty()) {
+          component->handle_nut_command_(client.fd, line, &client.authenticated);
+        }
       }
     }
   }
