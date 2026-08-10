@@ -157,6 +157,7 @@ void Nut::usb_client_task_(void *argument) {
   context.client = client;
   // Give remote log clients time to attach before the verbose HID dump.
   vTaskDelay(pdMS_TO_TICKS(30000));
+  component->usb_events_ready_ = true;
   component->discover_usb_devices_(client);
 
   while (true) {
@@ -171,7 +172,9 @@ void Nut::usb_client_task_(void *argument) {
 void Nut::usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument) {
   auto *context = static_cast<UsbClientContext *>(argument);
   ESP_LOGD(TAG, "USB client event: %d", event->event);
-  if (event->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
+  // Ignore hot-plug events until the startup delay has elapsed, so the
+  // initial capture/parse stays visible to remote log clients.
+  if (event->event == USB_HOST_CLIENT_EVENT_NEW_DEV && context->component->usb_events_ready_) {
     context->component->log_usb_device_(context->client, event->new_dev.address);
   }
 }

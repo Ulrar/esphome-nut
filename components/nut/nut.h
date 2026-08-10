@@ -86,6 +86,7 @@ class Nut : public Component {
   std::string description_;
   uint16_t port_{3493};
   volatile bool usb_host_started_{false};
+  volatile bool usb_events_ready_{false};
   uint8_t discovered_device_address_{0};
   uint8_t hid_interface_number_{0};
 
