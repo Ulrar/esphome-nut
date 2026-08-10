@@ -969,6 +969,7 @@ void Nut::nut_server_task_(void *argument) {
         const std::string line = trim_crlf(client.pending.substr(0, line_end));
         client.pending.erase(0, line_end + 1);
         if (!line.empty()) {
+          ESP_LOGD(TAG, "NUT fd=%d << %s", client.fd, line.c_str());
           component->handle_nut_command_(client.fd, line, &client.authenticated);
         }
       }
@@ -981,6 +982,7 @@ bool Nut::is_ups_name_(const std::string &name) const {
 }
 
 void Nut::send_line_(int client_fd, const std::string &line) const {
+  ESP_LOGD(TAG, "NUT fd=%d >> %s", client_fd, line.c_str());
   const std::string message = line + "\n";
   send(client_fd, message.c_str(), message.size(), 0);
 }

@@ -15,7 +15,7 @@ Nut = nut_ns.class_("Nut", cg.Component)
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(Nut),
-        cv.Required(CONF_UPS_NAME): cv.validate_id_name,
+        cv.Required(CONF_UPS_NAME): cv.string_strict,
         cv.Required(CONF_USERNAME): cv.string_strict,
         cv.Required(CONF_PASSWORD): cv.string_strict,
         cv.Optional(CONF_PORT, default=3493): cv.port,
