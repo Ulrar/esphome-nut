@@ -517,8 +517,15 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       if (usage_value > 0xFFFF) {
         usage_page = static_cast<uint16_t>((usage_value >> 16) & 0xFFFF);
       }
-      const UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
       const uint16_t offset = this->parse_bit_offsets_[report_type][globals.report_id];
+      if (usage_page == 0x84 && (usage >= 0x30 && usage <= 0x35)) {
+        ESP_LOGD(TAG,
+                 "Candidate usage %04X/%04X report(type=%u id=0x%02X off=%u bits=%u exp=%d unit=%08X logical=%d..%d mask=0x%02X flags=0x%02X)",
+                 usage_page, usage, report_type, globals.report_id, offset, static_cast<unsigned>(bits),
+                 static_cast<int>(globals.exponent), static_cast<unsigned>(globals.unit), globals.logical_min,
+                 globals.logical_max, collection_mask, static_cast<unsigned>(value));
+      }
+      const UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
       this->parse_bit_offsets_[report_type][globals.report_id] += bits;
       const bool ignore_constant = is_constant && report_type == HID_REPORT_TYPE_INPUT;
       if (ignore_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
