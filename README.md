@@ -45,7 +45,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/Ulrar/esphome-nut
-      ref: initial
+      ref: main
     refresh: 0s
     components: [nut]
 
@@ -55,7 +55,7 @@ nut:
   password: !secret nut_password
 ```
 
-`initial` is the development branch. For repeatable builds, pin a commit SHA.
+`main` tracks the latest state. For repeatable builds, pin a commit SHA.
 
 The server speaks plain-text NUT without TLS: restrict TCP/3493 to a trusted
 LAN/VLAN and use a unique long password.
