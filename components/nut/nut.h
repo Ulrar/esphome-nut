@@ -6,6 +6,8 @@
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "nut_hidparser.h"
 #include "mge_map.h"

@@ -49,7 +49,7 @@ struct UsbClientContext {
 };
 
 struct TransferContext {
-  volatile bool complete;
+  SemaphoreHandle_t done;
 };
 
 static std::string trim_crlf(std::string line) {
@@ -307,7 +307,11 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
 
 void Nut::usb_transfer_callback_(usb_transfer_t *transfer) {
   auto *context = static_cast<TransferContext *>(transfer->context);
-  context->complete = true;
+  BaseType_t woken = pdFALSE;
+  xSemaphoreGiveFromISR(context->done, &woken);
+  if (woken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
 }
 
 bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t type, uint8_t index,
@@ -320,7 +324,11 @@ bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t d
     return false;
   }
 
-  TransferContext context{false};
+  TransferContext context{xSemaphoreCreateBinary()};
+  if (context.done == nullptr) {
+    usb_host_transfer_free(transfer);
+    return false;
+  }
   usb_setup_packet_t setup{};
   const uint8_t recipient = type == 0x03 ? USB_BM_REQUEST_TYPE_RECIP_DEVICE : USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
   setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_STANDARD | recipient;
@@ -336,20 +344,24 @@ bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t d
   transfer->device_handle = device;
   transfer->callback = usb_transfer_callback_;
   transfer->context = &context;
+  transfer->timeout_ms = 2000;  // let the HCD time the transfer out and fire the callback
   const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
   if (submit_result != ESP_OK) {
     ESP_LOGW(TAG, "Unable to request descriptor: %s", esp_err_to_name(submit_result));
+    vSemaphoreDelete(context.done);
     usb_host_transfer_free(transfer);
     return false;
   }
-  ESP_LOGD(TAG, "Descriptor transfer submitted (type=0x%02X len=%u)", type, length);
 
-  for (uint8_t attempts = 0; attempts < 20 && !context.complete; attempts++) {
-    usb_host_client_handle_events(client, pdMS_TO_TICKS(100));
+  // Wait for the callback; the timeout above guarantees it fires. Keep
+  // pumping client events meanwhile so the completion is processed.
+  while (xSemaphoreTake(context.done, pdMS_TO_TICKS(100)) != pdTRUE) {
+    usb_host_client_handle_events(client, 0);
   }
-  ESP_LOGD(TAG, "Descriptor transfer wait done: complete=%d status=%d", context.complete, transfer->status);
+  usb_host_client_handle_events(client, 0);
+  vSemaphoreDelete(context.done);
 
-  const bool complete = context.complete && transfer->status == USB_TRANSFER_STATUS_COMPLETED;
+  const bool complete = transfer->status == USB_TRANSFER_STATUS_COMPLETED;
   if (!complete) {
     ESP_LOGW(TAG, "Descriptor transfer did not complete: status=%d", transfer->status);
     usb_host_transfer_free(transfer);
@@ -751,7 +763,11 @@ bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle
     return false;
   }
 
-  TransferContext context{false};
+  TransferContext context{xSemaphoreCreateBinary()};
+  if (context.done == nullptr) {
+    usb_host_transfer_free(transfer);
+    return false;
+  }
   usb_setup_packet_t setup{};
   setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_CLASS |
                         USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
@@ -767,20 +783,24 @@ bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle
   transfer->device_handle = device;
   transfer->callback = usb_transfer_callback_;
   transfer->context = &context;
+  transfer->timeout_ms = 1000;
 
   const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
   if (submit_result != ESP_OK) {
     ESP_LOGD(TAG, "GET_REPORT submit failed: %s", esp_err_to_name(submit_result));
+    vSemaphoreDelete(context.done);
     usb_host_transfer_free(transfer);
     return false;
   }
 
-  for (uint8_t attempts = 0; attempts < 10 && !context.complete; attempts++) {
-    usb_host_client_handle_events(client, pdMS_TO_TICKS(50));
+  while (xSemaphoreTake(context.done, pdMS_TO_TICKS(100)) != pdTRUE) {
+    usb_host_client_handle_events(client, 0);
   }
+  usb_host_client_handle_events(client, 0);
+  vSemaphoreDelete(context.done);
 
-  if (!context.complete || transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
-    ESP_LOGD(TAG, "GET_REPORT incomplete status=%d complete=%d", transfer->status, context.complete);
+  if (transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+    ESP_LOGD(TAG, "GET_REPORT incomplete status=%d", transfer->status);
     usb_host_transfer_free(transfer);
     return false;
   }
@@ -810,7 +830,11 @@ bool Nut::send_hid_report_(usb_host_client_handle_t client, usb_device_handle_t 
   payload[0] = item->ReportID;
   SetValue(item, payload, value);
 
-  TransferContext context{false};
+  TransferContext context{xSemaphoreCreateBinary()};
+  if (context.done == nullptr) {
+    usb_host_transfer_free(transfer);
+    return false;
+  }
   usb_setup_packet_t setup{};
   setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_CLASS |
                         USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
@@ -825,16 +849,20 @@ bool Nut::send_hid_report_(usb_host_client_handle_t client, usb_device_handle_t 
   transfer->device_handle = device;
   transfer->callback = usb_transfer_callback_;
   transfer->context = &context;
+  transfer->timeout_ms = 1000;
 
   const esp_err_t submit_result = usb_host_transfer_submit_control(client, transfer);
   if (submit_result != ESP_OK) {
+    vSemaphoreDelete(context.done);
     usb_host_transfer_free(transfer);
     return false;
   }
-  for (uint8_t attempts = 0; attempts < 10 && !context.complete; attempts++) {
-    usb_host_client_handle_events(client, pdMS_TO_TICKS(50));
+  while (xSemaphoreTake(context.done, pdMS_TO_TICKS(100)) != pdTRUE) {
+    usb_host_client_handle_events(client, 0);
   }
-  const bool ok = context.complete && transfer->status == USB_TRANSFER_STATUS_COMPLETED;
+  usb_host_client_handle_events(client, 0);
+  vSemaphoreDelete(context.done);
+  const bool ok = transfer->status == USB_TRANSFER_STATUS_COMPLETED;
   usb_host_transfer_free(transfer);
   return ok;
 }
