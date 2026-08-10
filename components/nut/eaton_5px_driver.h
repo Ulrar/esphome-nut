@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "ups_driver.h"
 
 namespace esphome {
@@ -14,10 +16,20 @@ class Eaton5pxDriver : public UpsDriver {
     if (!this->readings_.online && !this->readings_.on_battery) {
       return "WAIT";
     }
-    if (this->readings_.on_battery || this->readings_.discharging) {
-      return "OB";
+    this->status_cache_ = (this->readings_.on_battery || this->readings_.discharging) ? "OB" : "OL";
+    if (this->readings_.charging && !this->readings_.discharging) {
+      this->status_cache_ += " CHRG";
     }
-    return "OL";
+    if (this->readings_.discharging) {
+      this->status_cache_ += " DISCHRG";
+    }
+    if (this->readings_.has_battery_charge && this->readings_.battery_charge <= 20.0f) {
+      this->status_cache_ += " LB";
+    }
+    if (this->readings_.has_load_percent && this->readings_.load_percent >= 100.0f) {
+      this->status_cache_ += " OVER";
+    }
+    return this->status_cache_.c_str();
   }
 
   UpsSignal classify_field(uint16_t usage_page, uint16_t usage, uint32_t collection_mask) const override {
@@ -154,6 +166,7 @@ class Eaton5pxDriver : public UpsDriver {
 
  protected:
   DriverReadings readings_{};
+  mutable std::string status_cache_{};
 };
 
 }  // namespace nut

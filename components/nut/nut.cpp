@@ -892,7 +892,12 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.mfr \"" + this->driver_.manufacturer() + "\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.model \"" + this->driver_.model() + "\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.firmware \"" + this->driver_.firmware() + "\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.type \"ups\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"nut\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " output.voltage.nominal \"230.00\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.power.nominal \"1500.00\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.realpower.nominal \"1500.00\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " battery.charge.low \"20.00\"");
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
     if (readings.has_input_voltage) {
       send_float_var("input.voltage", readings.input_voltage);
@@ -944,8 +949,18 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.model \"" + this->driver_.model() + "\"");
     } else if (variable == "device.firmware") {
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.firmware \"" + this->driver_.firmware() + "\"");
+    } else if (variable == "device.type") {
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.type \"ups\"");
     } else if (variable == "driver.name") {
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"nut\"");
+    } else if (variable == "output.voltage.nominal") {
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " output.voltage.nominal \"230.00\"");
+    } else if (variable == "ups.power.nominal") {
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.power.nominal \"1500.00\"");
+    } else if (variable == "ups.realpower.nominal") {
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.realpower.nominal \"1500.00\"");
+    } else if (variable == "battery.charge.low") {
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " battery.charge.low \"20.00\"");
     } else if (variable == "ups.status") {
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
     } else if (variable == "input.voltage" && readings.has_input_voltage) {
