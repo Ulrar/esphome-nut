@@ -470,6 +470,29 @@ void Nut::resolve_hid_paths_() {
     ESP_LOGD(TAG, "Mapped %s -> %s (report 0x%02X)", entry.nut_var, entry.hid_path, item->ReportID);
   }
 
+  // Enum-valued vars: the HID value indexes a lookup string, like
+  // upstream test_read_info (usbhid-ups.c).
+  static const struct {
+    const char *nut_var;
+    const char *hid_path;
+    int convert;
+  } ENUM_VARS[] = {
+      {"ups.test.result", "UPS.BatterySystem.Battery.Test", 4},
+  };
+  for (const auto &entry : ENUM_VARS) {
+    HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
+    if (item == nullptr) {
+      continue;
+    }
+    ResolvedVar var{};
+    var.name = entry.nut_var;
+    var.convert = entry.convert;
+    var.item = item;
+    var.is_string = true;
+    this->vars_.push_back(var);
+    ESP_LOGD(TAG, "Mapped enum %s -> %s (report 0x%02X)", entry.nut_var, entry.hid_path, item->ReportID);
+  }
+
   // String-index vars (stringid_conversion in upstream): the HID value
   // is a USB string descriptor index.
   static const struct {
@@ -602,6 +625,24 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
       long logical = 0;
       GetValue(payload, var.item, &logical);
       if (var.is_string) {
+        if (var.convert == 4) {
+          // test_read_info lookup (values 1-7, 0 = no entry).
+          static const char *const TEST_RESULTS[] = {
+              nullptr,           // 0
+              "Done and passed", // 1
+              "Done and warning",
+              "Done and error",
+              "Aborted",
+              "In progress",
+              "No test initiated",
+              "Test scheduled",  // 7
+          };
+          if (logical >= 1 && logical <= 7) {
+            strlcpy(var.text, TEST_RESULTS[logical], sizeof(var.text));
+            var.valid = true;
+          }
+          continue;
+        }
         if (logical > 0 && logical < 255) {
           char text[sizeof(var.text)];
           if (this->get_string_descriptor_(client, device, static_cast<uint8_t>(logical), text, sizeof(text))) {

@@ -17,7 +17,7 @@ namespace nut {
 struct ResolvedVar {
   const char *name;    // NUT variable name, e.g. "input.voltage"
   const char *format;  // printf format from the mge-hid table
-  int convert;         // 0=plain, 1=Kelvin->Celsius, 2=As->Ah, 3=string index
+  int convert;         // 0=plain, 1=Kelvin->Celsius, 2=As->Ah, 3=string index, 4=test result enum
   HIDData_t *item;     // resolved descriptor item
   double value{0};
   char text[32]{};
