@@ -491,7 +491,6 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
     }
 
     const uint8_t report_type = item_tag == 0x8 ? HID_REPORT_TYPE_INPUT : HID_REPORT_TYPE_FEATURE;
-    const bool is_constant = (value & 0x01) != 0;
     const uint32_t count = std::max<uint32_t>(1, globals.report_count);
     const uint32_t bits = globals.report_size;
     uint8_t collection_mask = 0;
@@ -527,8 +526,7 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       }
       const UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
       this->parse_bit_offsets_[report_type][globals.report_id] += bits;
-      const bool ignore_constant = is_constant && report_type == HID_REPORT_TYPE_INPUT;
-      if (ignore_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
+      if (signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
         continue;
       }
       this->report_fields_[this->report_field_count_++] = {
