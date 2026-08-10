@@ -30,6 +30,7 @@ class Nut : public Component {
   static void nut_server_task_(void *argument);
 
   void start_usb_host_();
+  void discover_usb_devices_(usb_host_client_handle_t client) const;
   void serve_nut_client_(int client_fd) const;
   void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) const;
   bool is_ups_name_(const std::string &name) const;

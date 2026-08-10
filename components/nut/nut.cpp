@@ -136,6 +136,7 @@ void Nut::usb_client_task_(void *argument) {
     return;
   }
   context.client = client;
+  component->discover_usb_devices_(client);
 
   while (true) {
     const esp_err_t result = usb_host_client_handle_events(client, portMAX_DELAY);
@@ -147,8 +148,20 @@ void Nut::usb_client_task_(void *argument) {
 
 void Nut::usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument) {
   auto *context = static_cast<UsbClientContext *>(argument);
+  ESP_LOGD(TAG, "USB client event: %d", event->event);
   if (event->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
     context->component->log_usb_device_(context->client, event->new_dev.address);
+  }
+}
+
+void Nut::discover_usb_devices_(usb_host_client_handle_t client) const {
+  ESP_LOGD(TAG, "Scanning USB addresses for already attached devices");
+  for (uint8_t device_address = 1; device_address < 128; device_address++) {
+    usb_device_handle_t device = nullptr;
+    if (usb_host_device_open(client, device_address, &device) == ESP_OK) {
+      usb_host_device_close(client, device);
+      this->log_usb_device_(client, device_address);
+    }
   }
 }
 
