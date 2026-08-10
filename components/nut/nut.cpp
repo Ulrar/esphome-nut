@@ -38,6 +38,32 @@ struct TransferContext {
   volatile bool complete;
 };
 
+static uint8_t preferred_collection_mask(UpsSignal signal) {
+  switch (signal) {
+    case UpsSignal::INPUT_VOLTAGE:
+    case UpsSignal::INPUT_CURRENT:
+    case UpsSignal::INPUT_FREQUENCY:
+      return COLLECTION_INPUT;
+    case UpsSignal::OUTPUT_VOLTAGE:
+    case UpsSignal::OUTPUT_CURRENT:
+    case UpsSignal::OUTPUT_FREQUENCY:
+    case UpsSignal::OUTPUT_APPARENT_POWER:
+    case UpsSignal::OUTPUT_ACTIVE_POWER:
+    case UpsSignal::LOAD_PERCENT:
+      return COLLECTION_OUTPUT;
+    case UpsSignal::BATTERY_CHARGE:
+    case UpsSignal::RUNTIME_SECONDS:
+    case UpsSignal::BATTERY_VOLTAGE:
+    case UpsSignal::AC_PRESENT:
+    case UpsSignal::CHARGING:
+    case UpsSignal::DISCHARGING:
+      return COLLECTION_POWER_SUMMARY;
+    case UpsSignal::NONE:
+      return 0;
+  }
+  return 0;
+}
+
 static std::string trim_crlf(std::string line) {
   while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
     line.pop_back();
@@ -506,6 +532,9 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
           globals.logical_min < 0,
           globals.exponent,
           globals.unit,
+          globals.logical_min,
+          globals.logical_max,
+          collection_mask,
           signal,
       };
       ESP_LOGD(TAG,
@@ -540,6 +569,73 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
   if (this->report_field_count_ == 0) {
     ESP_LOGW(TAG, "No UPS-relevant HID fields were mapped from descriptor");
   }
+
+  if (this->report_field_count_ > 0) {
+    ReportFieldMapping selected[48]{};
+    uint8_t selected_count = 0;
+    constexpr uint8_t signal_limit = static_cast<uint8_t>(UpsSignal::DISCHARGING) + 1;
+    int16_t best_index_for_signal[signal_limit];
+    for (uint8_t i = 0; i < signal_limit; i++) {
+      best_index_for_signal[i] = -1;
+    }
+
+    // Pass 1: strict path-style selection using collection ancestry.
+    for (uint8_t i = 0; i < this->report_field_count_; i++) {
+      const auto &field = this->report_fields_[i];
+      const uint8_t signal_index = static_cast<uint8_t>(field.signal);
+      if (signal_index >= signal_limit || field.signal == UpsSignal::NONE) {
+        continue;
+      }
+      const uint8_t preferred = preferred_collection_mask(field.signal);
+      if (preferred != 0 && (field.collection_mask & preferred) != 0 && best_index_for_signal[signal_index] < 0) {
+        best_index_for_signal[signal_index] = i;
+      }
+    }
+
+    // Pass 2 fallback: first descriptor-mapped field per signal.
+    for (uint8_t i = 0; i < this->report_field_count_; i++) {
+      const auto &field = this->report_fields_[i];
+      const uint8_t signal_index = static_cast<uint8_t>(field.signal);
+      if (signal_index >= signal_limit || field.signal == UpsSignal::NONE) {
+        continue;
+      }
+      if (best_index_for_signal[signal_index] < 0) {
+        best_index_for_signal[signal_index] = i;
+      }
+    }
+
+    for (uint8_t signal_index = 0; signal_index < signal_limit; signal_index++) {
+      const int16_t chosen = best_index_for_signal[signal_index];
+      if (chosen < 0) {
+        continue;
+      }
+      selected[selected_count++] = this->report_fields_[chosen];
+    }
+
+    this->report_field_count_ = selected_count;
+    for (uint8_t i = 0; i < selected_count; i++) {
+      this->report_fields_[i] = selected[i];
+    }
+  }
+
+  this->report_request_count_ = 0;
+  for (uint8_t field_index = 0; field_index < this->report_field_count_; field_index++) {
+    const auto &field = this->report_fields_[field_index];
+    const uint16_t required_bits = static_cast<uint16_t>(field.bit_offset + field.bit_size);
+    bool found = false;
+    for (uint8_t request_index = 0; request_index < this->report_request_count_; request_index++) {
+      auto &request = this->report_requests_[request_index];
+      if (request.report_id == field.report_id && request.report_type == field.report_type) {
+        request.required_bits = std::max<uint16_t>(request.required_bits, required_bits);
+        found = true;
+        break;
+      }
+    }
+    if (!found && this->report_request_count_ < 16) {
+      this->report_requests_[this->report_request_count_++] = {field.report_id, field.report_type, required_bits};
+    }
+  }
+
   if (this->report_request_count_ == 0) {
     ESP_LOGW(TAG, "No HID reports selected for polling");
   } else {

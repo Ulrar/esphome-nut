@@ -19,6 +19,9 @@ struct ReportFieldMapping {
   bool is_signed;
   int8_t exponent;
   uint32_t unit;
+  int32_t logical_min;
+  int32_t logical_max;
+  uint8_t collection_mask;
   UpsSignal signal;
 };
 
