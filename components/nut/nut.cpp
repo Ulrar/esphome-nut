@@ -216,6 +216,7 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
 
   // Fetch the configuration descriptor with a manual control transfer;
   // usb_host_get_active_config_descriptor() hangs on this device.
+  ESP_LOGI(TAG, "Fetching configuration descriptor");
   uint8_t config_buffer[512]{};
   size_t config_actual = 0;
   if (!this->get_descriptor_(client, device, USB_B_DESCRIPTOR_TYPE_CONFIGURATION, 0, 0, config_buffer, 9,
@@ -315,10 +316,12 @@ bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t d
     usb_host_transfer_free(transfer);
     return false;
   }
+  ESP_LOGD(TAG, "Descriptor transfer submitted (type=0x%02X len=%u)", type, length);
 
   for (uint8_t attempts = 0; attempts < 20 && !context.complete; attempts++) {
     usb_host_client_handle_events(client, pdMS_TO_TICKS(100));
   }
+  ESP_LOGD(TAG, "Descriptor transfer wait done: complete=%d status=%d", context.complete, transfer->status);
 
   const bool complete = context.complete && transfer->status == USB_TRANSFER_STATUS_COMPLETED;
   if (!complete) {
