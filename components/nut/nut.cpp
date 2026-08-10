@@ -280,13 +280,13 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   } else if (report_length > MAX_HID_REPORT_DESCRIPTOR_LENGTH) {
     ESP_LOGW(TAG, "HID report descriptor is too large: %u bytes", report_length);
   } else {
-    if (this->hid_desc_ == nullptr || this->discovered_device_address_ != device_address) {
-      this->discovered_device_address_ = device_address;
-      this->hid_interface_number_ = hid_interface;
-      ESP_LOGI(TAG, "Capturing HID report descriptor: interface=%u length=%u", hid_interface, report_length);
-      const bool ok = this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
-      ESP_LOGI(TAG, "HID capture %s", ok ? "succeeded" : "failed");
-    }
+    // Dev mode: re-capture and re-parse on every scan so the verbose
+    // tree dump is visible whenever a log client is attached.
+    this->discovered_device_address_ = device_address;
+    this->hid_interface_number_ = hid_interface;
+    ESP_LOGI(TAG, "Capturing HID report descriptor: interface=%u length=%u", hid_interface, report_length);
+    const bool ok = this->capture_hid_report_descriptor_(client, device, hid_interface, report_length);
+    ESP_LOGI(TAG, "HID capture %s", ok ? "succeeded" : "failed");
     if (this->hid_desc_ != nullptr) {
       this->poll_hid_reports_(client, device);
     }
