@@ -666,6 +666,21 @@ void Nut::resolve_hid_paths_() {
     ESP_LOGI(TAG, "Mapped command %s -> %s (report 0x%02X)", entry.name, entry.hid_path, item->ReportID);
   }
 
+  // Highest switchable outlet group resolved (outlet.1..3). Home Assistant
+  // 2026.8 only discovers outlet commands when outlet.count is reported.
+  this->outlet_count_ = 0;
+  for (int n = 3; n >= 1; n--) {
+    char path[] = "UPS.OutletSystem.Outlet.[X].PresentStatus.Switchable";
+    path[sizeof("UPS.OutletSystem.Outlet.[") - 1] = static_cast<char>('1' + n);
+    if (nut_hid_find_object(this->hid_desc_, path) != nullptr) {
+      this->outlet_count_ = static_cast<uint8_t>(n);
+      break;
+    }
+  }
+  if (this->outlet_count_ > 0) {
+    ESP_LOGI(TAG, "Outlet groups: %u", this->outlet_count_);
+  }
+
   // Poll plan: one request per (report ID, report type) covering all
   // resolved items; report length comes from the parsed descriptor.
   auto add_request = [&](const HIDData_t *item) {
@@ -1064,6 +1079,8 @@ void Nut::get_var_value_(int client_fd, const std::string &variable) const {
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.serial \"" + this->device_serial_ + "\"");
   } else if (variable == "device.type") {
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.type \"ups\"");
+  } else if (variable == "outlet.count") {
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " outlet.count \"" + std::to_string(this->outlet_count_) + "\"");
   } else if (variable == "driver.name") {
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " driver.name \"usbhid-ups\"");
   } else if (variable == "ups.status") {
@@ -1293,6 +1310,9 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     this->get_var_value_(client_fd, "driver.name");
     this->get_var_value_(client_fd, "ups.status");
     this->get_var_value_(client_fd, "battery.charger.status");
+    if (this->outlet_count_ > 0) {
+      this->get_var_value_(client_fd, "outlet.count");
+    }
     for (const auto &var : this->vars_) {
       if (var.valid && var.convert != 5) {
         this->get_var_value_(client_fd, var.name);

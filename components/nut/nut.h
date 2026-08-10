@@ -103,6 +103,7 @@ class Nut : public Component {
   std::string device_model_{"UPS"};
   std::string device_serial_;
   uint16_t port_{3493};
+  uint8_t outlet_count_{0};  // highest resolved outlet group (0 = none)
   volatile bool usb_host_started_{false};
   volatile bool usb_events_ready_{false};
   usb_device_handle_t ups_device_{nullptr};  // kept open once claimed
