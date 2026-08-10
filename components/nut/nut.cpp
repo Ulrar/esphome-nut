@@ -428,6 +428,20 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   }
   ESP_LOGI(TAG, "Parsed %u HID items", static_cast<unsigned>(this->hid_desc_->nitems));
 
+  // Report the UPS USB personality mode (UPS.System.USB.Mode, 0xFD) so we
+  // can tell whether the unit exposes its reduced or full HID descriptor.
+  {
+    HIDData_t *mode_item = nut_hid_find_object(this->hid_desc_, "UPS.System.USB.Mode");
+    if (mode_item != nullptr) {
+      uint8_t report[8] = {0};
+      size_t actual = 0;
+      if (this->request_hid_report_(client, device, this->hid_interface_number_, HID_REPORT_TYPE_FEATURE,
+                                    mode_item->ReportID, sizeof(report), report, &actual) && actual > 1) {
+        ESP_LOGI(TAG, "USB.Mode = %u", report[1]);
+      }
+    }
+  }
+
   this->resolve_hid_paths_();
   return !this->report_requests_.empty();
 }
