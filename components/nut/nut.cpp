@@ -323,12 +323,24 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   const size_t actual_length = std::min(transferred_data_bytes, static_cast<size_t>(report_length));
   ESP_LOGI(TAG, "HID report descriptor: interface=%u length=%u", interface_number, actual_length);
 
+  // Copy the descriptor out so the transfer buffer can be freed before
+  // the (heap-hungry) parse step.
+  auto *descriptor_copy = static_cast<uint8_t *>(malloc(actual_length));
+  if (descriptor_copy == nullptr) {
+    ESP_LOGW(TAG, "Unable to allocate %u bytes for the HID descriptor copy",
+             static_cast<unsigned>(actual_length));
+    usb_host_transfer_free(transfer);
+    return false;
+  }
+  memcpy(descriptor_copy, report, actual_length);
+  usb_host_transfer_free(transfer);
+
   if (this->hid_desc_ != nullptr) {
     Free_ReportDesc(this->hid_desc_);
     this->hid_desc_ = nullptr;
   }
-  this->hid_desc_ = Parse_ReportDesc(const_cast<uint8_t *>(report), actual_length);
-  usb_host_transfer_free(transfer);
+  this->hid_desc_ = Parse_ReportDesc(descriptor_copy, actual_length);
+  free(descriptor_copy);
 
   ESP_LOGI(TAG, "HID report descriptor captured: %u bytes, parsing", static_cast<unsigned>(actual_length));
   if (this->hid_desc_ == nullptr) {
