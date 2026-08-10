@@ -799,8 +799,26 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     if (readings.has_input_voltage) {
       send_float_var("input.voltage", readings.input_voltage);
     }
+    if (readings.has_input_frequency) {
+      send_float_var("input.frequency", readings.input_frequency);
+    }
+    if (readings.has_input_current) {
+      send_float_var("input.current", readings.input_current);
+    }
     if (readings.has_output_voltage) {
       send_float_var("output.voltage", readings.output_voltage);
+    }
+    if (readings.has_output_frequency) {
+      send_float_var("output.frequency", readings.output_frequency);
+    }
+    if (readings.has_output_current) {
+      send_float_var("output.current", readings.output_current);
+    }
+    if (readings.has_output_apparent_power) {
+      send_float_var("ups.power", readings.output_apparent_power);
+    }
+    if (readings.has_output_active_power) {
+      send_float_var("ups.realpower", readings.output_active_power);
     }
     if (readings.has_load_percent) {
       send_float_var("ups.load", readings.load_percent);
@@ -810,6 +828,9 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     }
     if (readings.has_runtime_seconds) {
       send_float_var("battery.runtime", readings.runtime_seconds);
+    }
+    if (readings.has_battery_voltage) {
+      send_float_var("battery.voltage", readings.battery_voltage);
     }
     this->send_line_(client_fd, "END LIST VAR " + this->ups_name_);
   } else if (command == "GET") {
@@ -831,14 +852,28 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
       this->send_line_(client_fd, "VAR " + this->ups_name_ + " ups.status \"" + this->driver_.status() + "\"");
     } else if (variable == "input.voltage" && readings.has_input_voltage) {
       send_float_var("input.voltage", readings.input_voltage);
+    } else if (variable == "input.frequency" && readings.has_input_frequency) {
+      send_float_var("input.frequency", readings.input_frequency);
+    } else if (variable == "input.current" && readings.has_input_current) {
+      send_float_var("input.current", readings.input_current);
     } else if (variable == "output.voltage" && readings.has_output_voltage) {
       send_float_var("output.voltage", readings.output_voltage);
+    } else if (variable == "output.frequency" && readings.has_output_frequency) {
+      send_float_var("output.frequency", readings.output_frequency);
+    } else if (variable == "output.current" && readings.has_output_current) {
+      send_float_var("output.current", readings.output_current);
+    } else if (variable == "ups.power" && readings.has_output_apparent_power) {
+      send_float_var("ups.power", readings.output_apparent_power);
+    } else if (variable == "ups.realpower" && readings.has_output_active_power) {
+      send_float_var("ups.realpower", readings.output_active_power);
     } else if (variable == "ups.load" && readings.has_load_percent) {
       send_float_var("ups.load", readings.load_percent);
     } else if (variable == "battery.charge" && readings.has_battery_charge) {
       send_float_var("battery.charge", readings.battery_charge);
     } else if (variable == "battery.runtime" && readings.has_runtime_seconds) {
       send_float_var("battery.runtime", readings.runtime_seconds);
+    } else if (variable == "battery.voltage" && readings.has_battery_voltage) {
+      send_float_var("battery.voltage", readings.battery_voltage);
     } else {
       this->send_line_(client_fd, "ERR VAR-NOT-SUPPORTED");
     }

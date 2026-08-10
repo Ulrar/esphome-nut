@@ -28,6 +28,31 @@ class Eaton5pxDriver : public UpsDriver {
       if ((collection_mask & COLLECTION_OUTPUT) != 0) {
         return UpsSignal::OUTPUT_VOLTAGE;
       }
+      if ((collection_mask & COLLECTION_POWER_SUMMARY) != 0) {
+        return UpsSignal::BATTERY_VOLTAGE;
+      }
+    }
+    if (usage_page == 0x84 && usage == 0x31) {
+      if ((collection_mask & COLLECTION_INPUT) != 0) {
+        return UpsSignal::INPUT_CURRENT;
+      }
+      if ((collection_mask & COLLECTION_OUTPUT) != 0) {
+        return UpsSignal::OUTPUT_CURRENT;
+      }
+    }
+    if (usage_page == 0x84 && usage == 0x32) {
+      if ((collection_mask & COLLECTION_INPUT) != 0) {
+        return UpsSignal::INPUT_FREQUENCY;
+      }
+      if ((collection_mask & COLLECTION_OUTPUT) != 0) {
+        return UpsSignal::OUTPUT_FREQUENCY;
+      }
+    }
+    if (usage_page == 0x84 && usage == 0x33 && (collection_mask & COLLECTION_OUTPUT) != 0) {
+      return UpsSignal::OUTPUT_APPARENT_POWER;
+    }
+    if (usage_page == 0x84 && usage == 0x34 && (collection_mask & COLLECTION_OUTPUT) != 0) {
+      return UpsSignal::OUTPUT_ACTIVE_POWER;
     }
     if (usage_page == 0x84 && usage == 0x35) {
       return UpsSignal::LOAD_PERCENT;
@@ -60,6 +85,30 @@ class Eaton5pxDriver : public UpsDriver {
         this->readings_.output_voltage = value;
         this->readings_.has_output_voltage = true;
         break;
+      case UpsSignal::INPUT_FREQUENCY:
+        this->readings_.input_frequency = value;
+        this->readings_.has_input_frequency = true;
+        break;
+      case UpsSignal::OUTPUT_FREQUENCY:
+        this->readings_.output_frequency = value;
+        this->readings_.has_output_frequency = true;
+        break;
+      case UpsSignal::INPUT_CURRENT:
+        this->readings_.input_current = value;
+        this->readings_.has_input_current = true;
+        break;
+      case UpsSignal::OUTPUT_CURRENT:
+        this->readings_.output_current = value;
+        this->readings_.has_output_current = true;
+        break;
+      case UpsSignal::OUTPUT_APPARENT_POWER:
+        this->readings_.output_apparent_power = value;
+        this->readings_.has_output_apparent_power = true;
+        break;
+      case UpsSignal::OUTPUT_ACTIVE_POWER:
+        this->readings_.output_active_power = value;
+        this->readings_.has_output_active_power = true;
+        break;
       case UpsSignal::LOAD_PERCENT:
         this->readings_.load_percent = value;
         this->readings_.has_load_percent = true;
@@ -71,6 +120,10 @@ class Eaton5pxDriver : public UpsDriver {
       case UpsSignal::RUNTIME_SECONDS:
         this->readings_.runtime_seconds = value;
         this->readings_.has_runtime_seconds = true;
+        break;
+      case UpsSignal::BATTERY_VOLTAGE:
+        this->readings_.battery_voltage = value;
+        this->readings_.has_battery_voltage = true;
         break;
       case UpsSignal::AC_PRESENT:
       case UpsSignal::CHARGING:
