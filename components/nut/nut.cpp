@@ -155,6 +155,8 @@ void Nut::usb_client_task_(void *argument) {
     return;
   }
   context.client = client;
+  // Give remote log clients time to attach before the verbose HID dump.
+  vTaskDelay(pdMS_TO_TICKS(15000));
   component->discover_usb_devices_(client);
 
   while (true) {
