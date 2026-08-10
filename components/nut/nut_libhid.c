@@ -695,3 +695,8 @@ double nut_hid_scale_value(const HIDData_t *data, long logical)
 
 	return value * exponent(10, unit_expo);
 }
+
+int nut_path_to_string(char *string, size_t size, const HIDPath_t *path)
+{
+	return path_to_string(string, size, path, mge_utab);
+}

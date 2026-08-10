@@ -29,6 +29,9 @@ typedef usage_lkp_t *usage_tables_t;
 int string_to_path(const char *string, HIDPath_t *path, usage_tables_t *utab);
 int path_to_string(char *string, size_t size, const HIDPath_t *path, usage_tables_t *utab);
 
+/* path_to_string with the vendored MGE + global HID usage tables. */
+int nut_path_to_string(char *string, size_t size, const HIDPath_t *path);
+
 /* Resolve a dotted HID path (e.g. "UPS.PowerConverter.Input.[1].Voltage")
  * against a parsed report descriptor. Returns NULL if not found. */
 HIDData_t *nut_hid_find_object(HIDDesc_t *desc, const char *hidpath);

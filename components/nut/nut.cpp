@@ -155,8 +155,6 @@ void Nut::usb_client_task_(void *argument) {
     return;
   }
   context.client = client;
-  // Give remote log clients time to attach before the verbose HID dump.
-  vTaskDelay(pdMS_TO_TICKS(30000));
   component->usb_events_ready_ = true;
   component->discover_usb_devices_(client);
 
@@ -432,7 +430,7 @@ void Nut::resolve_hid_paths_() {
     char path[160];
     for (size_t i = 0; i < this->hid_desc_->nitems; i++) {
       const HIDData_t *item = &this->hid_desc_->item[i];
-      if (path_to_string(path, sizeof(path), &item->Path, nullptr) > 0) {
+      if (nut_path_to_string(path, sizeof(path), &item->Path) > 0) {
         ESP_LOGD(TAG, "Path: %s, Type: %s, ReportID: 0x%02X, Offset: %u, Size: %u", path,
                  item->Type == ITEM_FEATURE ? "Feature" : item->Type == ITEM_INPUT ? "Input" : "Output",
                  item->ReportID, item->Offset, item->Size);
