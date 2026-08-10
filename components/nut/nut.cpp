@@ -412,10 +412,11 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
   ESP_LOGI(TAG, "HID report descriptor captured: %u bytes, parsing", static_cast<unsigned>(actual_length));
 
   // Dump the raw descriptor as hex so it can be replayed offline.
-  for (size_t off = 0; off < actual_length; off += 16) {
-    char line[56];
+  // Short lines keep each log message under the task log buffer.
+  for (size_t off = 0; off < actual_length; off += 12) {
+    char line[48];
     size_t pos = snprintf(line, sizeof(line), "DESC %04x:", static_cast<unsigned>(off));
-    const size_t n = std::min<size_t>(16, actual_length - off);
+    const size_t n = std::min<size_t>(12, actual_length - off);
     for (size_t i = 0; i < n && pos + 4 < sizeof(line); i++) {
       pos += snprintf(line + pos, sizeof(line) - pos, " %02x", descriptor_copy[off + i]);
     }
