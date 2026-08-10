@@ -348,10 +348,10 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
   } globals;
   uint8_t collection_stack[8]{};
   uint8_t collection_depth = 0;
-  uint16_t local_usages[16]{};
+  uint32_t local_usages[16]{};
   uint8_t local_usage_count = 0;
-  uint16_t local_usage_min = 0;
-  uint16_t local_usage_max = 0;
+  uint32_t local_usage_min = 0;
+  uint32_t local_usage_max = 0;
   bool has_usage_range = false;
   uint16_t bit_offsets[4][256]{};
 
@@ -420,12 +420,12 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
 
     if (item_type == 2) {  // local
       if (item_tag == 0x0 && local_usage_count < sizeof(local_usages) / sizeof(local_usages[0])) {
-        local_usages[local_usage_count++] = static_cast<uint16_t>(value);
+        local_usages[local_usage_count++] = value;
       } else if (item_tag == 0x1) {
-        local_usage_min = static_cast<uint16_t>(value);
+        local_usage_min = value;
         has_usage_range = true;
       } else if (item_tag == 0x2) {
-        local_usage_max = static_cast<uint16_t>(value);
+        local_usage_max = value;
         has_usage_range = true;
       }
       continue;
@@ -439,9 +439,9 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       if (collection_depth < sizeof(collection_stack)) {
         uint16_t usage = 0;
         if (local_usage_count > 0) {
-          usage = local_usages[local_usage_count - 1];
+            usage = static_cast<uint16_t>(local_usages[local_usage_count - 1] & 0xFFFF);
         } else if (has_usage_range) {
-          usage = local_usage_min;
+            usage = static_cast<uint16_t>(local_usage_min & 0xFFFF);
         }
         collection_stack[collection_depth++] = static_cast<uint8_t>(usage);
       }
@@ -479,11 +479,19 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
     }
 
     for (uint32_t item_index = 0; item_index < count; item_index++) {
-      const uint16_t usage =
+      const uint32_t usage_value =
           item_index < local_usage_count
               ? local_usages[item_index]
-              : (has_usage_range ? static_cast<uint16_t>(local_usage_min + item_index) : 0);
-      const UpsSignal signal = this->driver_.classify_field(globals.usage_page, usage, collection_mask);
+              : (has_usage_range ? (local_usage_min + item_index) : 0);
+      uint16_t usage_page = globals.usage_page;
+      uint16_t usage = static_cast<uint16_t>(usage_value & 0xFFFF);
+      if (usage_value > 0xFFFF) {
+        usage_page = static_cast<uint16_t>((usage_value >> 16) & 0xFFFF);
+      }
+      UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
+      if (signal == UpsSignal::NONE) {
+        signal = this->driver_.classify_field(usage_page, usage, 0);
+      }
       const uint16_t offset = bit_offsets[report_type][globals.report_id];
       bit_offsets[report_type][globals.report_id] += bits;
       if (is_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
@@ -500,7 +508,7 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       };
       ESP_LOGD(TAG,
                "Mapped usage %04X/%04X -> signal=%u report(type=%u id=0x%02X off=%u bits=%u exp=%d mask=0x%02X)",
-               globals.usage_page, usage, static_cast<unsigned>(signal), report_type, globals.report_id, offset,
+               usage_page, usage, static_cast<unsigned>(signal), report_type, globals.report_id, offset,
                static_cast<unsigned>(bits), static_cast<int>(globals.exponent), collection_mask);
       if (signal == UpsSignal::AC_PRESENT) {
         this->has_ac_present_field_ = true;
