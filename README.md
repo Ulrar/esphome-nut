@@ -60,6 +60,27 @@ nut:
 The server speaks plain-text NUT without TLS: restrict TCP/3493 to a trusted
 LAN/VLAN and use a unique long password.
 
+## Known limitations
+
+- The 5PX G2 HID descriptor does not expose live `input.voltage` /
+  `input.current` / `input.frequency` (only the nominal `Flow.[1].Config*`
+  values), nor `AudibleAlarmControl` — so no live input metrics and no
+  beeper commands, matching upstream `usbhid-ups` on the same hardware.
+- Outlet groups are named (`Outlet.[1..3].iDesignator`) but expose no
+  switch/delay control paths over USB HID. Eaton's own software likely uses
+  the vendor COPIBridge reports (0xFE/0xFF); reverse-engineering those is
+  possible future work.
+- Instant commands are executed without interlock checks — `load.off.delay`
+  and `shutdown.*` really do power down the load.
+
+## A note on authorship
+
+This project was built by an LLM coding assistant (GitHub Copilot CLI) under
+human direction — "vibe coded", including the ESPHome glue, with the NUT
+parser and mapping tables vendored from upstream. Treat it accordingly:
+it works on the developer's hardware, but review before trusting it with
+production power control.
+
 ## Debugging
 
 - The `DUMPDESC` command on the NUT port streams the raw HID report

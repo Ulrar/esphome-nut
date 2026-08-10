@@ -22,7 +22,9 @@ ota:
 
 # USB host consumes the S3's native USB PHY on GPIO19/GPIO20.
 # Keep logging on UART0 so it does not contend with USB_SERIAL_JTAG.
+# Use VERBOSE only for short-term debugging; INFO is fine for daily use.
 logger:
+  level: INFO
   hardware_uart: UART0
 
 debug:
@@ -38,8 +40,10 @@ sensor:
 
 external_components:
   - source:
-      type: local
-      path: ../components
+      type: git
+      url: https://github.com/Ulrar/esphome-nut
+      ref: initial
+    refresh: 0s
     components: [nut]
 
 nut:
