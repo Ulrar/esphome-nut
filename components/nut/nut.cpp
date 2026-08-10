@@ -406,22 +406,15 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
     Free_ReportDesc(this->hid_desc_);
     this->hid_desc_ = nullptr;
   }
+  // Keep the raw descriptor around for the DUMPDESC debug command.
+  if (this->raw_desc_ != nullptr) {
+    free(this->raw_desc_);
+  }
+  this->raw_desc_ = descriptor_copy;
+  this->raw_desc_len_ = actual_length;
   this->hid_desc_ = Parse_ReportDesc(descriptor_copy, actual_length);
-  free(descriptor_copy);
 
   ESP_LOGI(TAG, "HID report descriptor captured: %u bytes, parsing", static_cast<unsigned>(actual_length));
-
-  // Dump the raw descriptor as hex so it can be replayed offline.
-  // Short lines keep each log message under the task log buffer.
-  for (size_t off = 0; off < actual_length; off += 12) {
-    char line[48];
-    size_t pos = snprintf(line, sizeof(line), "DESC %04x:", static_cast<unsigned>(off));
-    const size_t n = std::min<size_t>(12, actual_length - off);
-    for (size_t i = 0; i < n && pos + 4 < sizeof(line); i++) {
-      pos += snprintf(line + pos, sizeof(line) - pos, " %02x", descriptor_copy[off + i]);
-    }
-    ESP_LOGI(TAG, "%s", line);
-  }
   if (this->hid_desc_ == nullptr) {
     ESP_LOGW(TAG, "Upstream HID parser rejected the report descriptor");
     return false;
@@ -795,6 +788,18 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
   } else if (command == "LOGOUT") {
     *authenticated = false;
     this->send_line_(client_fd, "OK Goodbye");
+  } else if (line == "DUMPDESC") {
+    // Debug: stream the raw HID report descriptor as hex lines.
+    char line[56];
+    for (size_t off = 0; off < this->raw_desc_len_; off += 16) {
+      size_t pos = snprintf(line, sizeof(line), "%04x:", static_cast<unsigned>(off));
+      const size_t n = std::min<size_t>(16, this->raw_desc_len_ - off);
+      for (size_t i = 0; i < n && pos + 4 < sizeof(line); i++) {
+        pos += snprintf(line + pos, sizeof(line) - pos, " %02x", this->raw_desc_[off + i]);
+      }
+      this->send_line_(client_fd, line);
+    }
+    this->send_line_(client_fd, "END");
   } else if (line == "LIST UPS") {
     this->send_line_(client_fd, "BEGIN LIST UPS");
     this->send_line_(client_fd, "UPS " + this->ups_name_ + " \"" + this->description_ + "\"");

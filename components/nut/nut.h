@@ -91,6 +91,8 @@ class Nut : public Component {
   uint8_t hid_interface_number_{0};
 
   HIDDesc_t *hid_desc_{nullptr};
+  uint8_t *raw_desc_{nullptr};
+  size_t raw_desc_len_{0};
   std::vector<ResolvedVar> vars_;
   std::vector<ResolvedBool> bools_;
   std::vector<ReportRequest> report_requests_;
