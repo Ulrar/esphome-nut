@@ -596,18 +596,6 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       }
     }
 
-    // Pass 2 fallback: first descriptor-mapped field per signal.
-    for (uint8_t i = 0; i < this->report_field_count_; i++) {
-      const auto &field = this->report_fields_[i];
-      const uint8_t signal_index = static_cast<uint8_t>(field.signal);
-      if (signal_index >= signal_limit || field.signal == UpsSignal::NONE) {
-        continue;
-      }
-      if (best_index_for_signal[signal_index] < 0) {
-        best_index_for_signal[signal_index] = i;
-      }
-    }
-
     for (uint8_t signal_index = 0; signal_index < signal_limit; signal_index++) {
       const int16_t chosen = best_index_for_signal[signal_index];
       if (chosen < 0) {
@@ -674,9 +662,7 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
     this->apply_report_data_(request.report_type, request.report_id, report_buffer, actual);
   }
 
-  if (any_ok && !this->has_ac_present_field_) {
-    this->driver_.set_ac_present(true);
-  }
+  (void) any_ok;
 }
 
 bool Nut::request_hid_report_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t interface_number,
