@@ -17,7 +17,9 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <string>
+#include <utility>
 
 #include "esphome/core/log.h"
 
@@ -904,11 +906,29 @@ void Nut::nut_server_task_(void *argument) {
     sockaddr_in client_address{};
     socklen_t client_address_length = sizeof(client_address);
     const int client_fd = accept(server_fd, reinterpret_cast<sockaddr *>(&client_address), &client_address_length);
-    if (client_fd >= 0) {
-      component->serve_nut_client_(client_fd);
+    if (client_fd < 0) {
+      continue;
+    }
+    // Serve each connection on its own task so long-lived clients
+    // (upsmon) don't block others. The arg must outlive the task start.
+    auto *args = new (std::nothrow) std::pair<Nut *, int>(component, client_fd);
+    if (args == nullptr ||
+        xTaskCreate(nut_client_task_, "nut_client", 6144, args, 4, nullptr) != pdPASS) {
+      delete args;
       close(client_fd);
+      ESP_LOGW(TAG, "Unable to spawn NUT client task; connection dropped");
     }
   }
+}
+
+void Nut::nut_client_task_(void *argument) {
+  auto *args = static_cast<std::pair<Nut *, int> *>(argument);
+  Nut *component = args->first;
+  const int client_fd = args->second;
+  delete args;
+  component->serve_nut_client_(client_fd);
+  close(client_fd);
+  vTaskDelete(nullptr);
 }
 
 void Nut::serve_nut_client_(int client_fd) {

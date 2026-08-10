@@ -65,6 +65,7 @@ class Nut : public Component {
   static void usb_client_event_callback_(const usb_host_client_event_msg_t *event, void *argument);
   static void usb_transfer_callback_(usb_transfer_t *transfer);
   static void nut_server_task_(void *argument);
+  static void nut_client_task_(void *argument);
 
   void start_usb_host_();
   void discover_usb_devices_(usb_host_client_handle_t client);
