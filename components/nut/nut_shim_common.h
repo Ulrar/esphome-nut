@@ -5,13 +5,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #define upslogx(...) ((void) 0)
 #define upsdebugx(...) ((void) 0)
 #define LOG_ERR 3
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 static inline void fatalx(int status, const char *fmt, ...) {
   (void) fmt;

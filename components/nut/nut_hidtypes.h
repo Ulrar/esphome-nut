@@ -35,8 +35,8 @@ extern "C" {
 
 #include <sys/types.h>
 
-#include "shim/nut_stdint.h"
-#include "shim/nut_bool.h"
+#include "nut_shim_stdint.h"
+#include "nut_shim_bool.h"
 
 /*
  * Constants

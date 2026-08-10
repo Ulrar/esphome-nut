@@ -25,7 +25,7 @@
 #include <strings.h>
 #include <inttypes.h>
 
-#include "shim/common.h"
+#include "nut_shim_common.h"
 
 #define SMALLBUF 128
 #ifndef upsdebugx

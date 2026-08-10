@@ -22,14 +22,14 @@
  *
  * -------------------------------------------------------------------------- */
 
-#include "shim/config.h" /* must be first */
+#include "nut_shim_config.h" /* must be first */
 
 #include <string.h>
 #include <stdlib.h>
 
-#include "hidparser.h"
-#include "shim/nut_stdint.h"  /* for int8_t, int16_t, int32_t */
-#include "shim/common.h"      /* for fatalx() */
+#include "nut_hidparser.h"
+#include "nut_shim_stdint.h"  /* for int8_t, int16_t, int32_t */
+#include "nut_shim_common.h"      /* for fatalx() */
 
 static const uint8_t ItemSize[4] = { 0, 1, 2, 4 };
 

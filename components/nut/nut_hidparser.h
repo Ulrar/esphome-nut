@@ -37,14 +37,14 @@ extern "C" {
  * It must be the first header: be sure to know all about system config.
  */
 #ifndef NUT_NETVERSION
-# include "shim/config.h"
+# include "nut_shim_config.h"
 #endif
 
-#include "hidtypes.h"
+#include "nut_hidtypes.h"
 
 /* ESPHome port: only the ESP-IDF USB host backend exists, and the
  * usb_ctrl_* types come from our local shim. */
-# include "shim/usb-common.h"
+# include "nut_shim_usb_common.h"
 
 /*
  * Parse_ReportDesc

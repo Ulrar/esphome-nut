@@ -7,8 +7,8 @@
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
 
-#include "upstream/hidparser.h"
-#include "upstream/mge_map.h"
+#include "nut_hidparser.h"
+#include "mge_map.h"
 
 namespace esphome {
 namespace nut {

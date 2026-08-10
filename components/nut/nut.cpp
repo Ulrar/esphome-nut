@@ -28,7 +28,7 @@
 #include "usb/usb_host.h"
 #include "usb/usb_types_ch9.h"
 
-#include "upstream/nut_libhid.h"
+#include "nut_libhid.h"
 
 namespace esphome {
 namespace nut {

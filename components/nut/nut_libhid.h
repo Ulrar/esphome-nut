@@ -11,7 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "hidparser.h"
+#include "nut_hidparser.h"
 
 #ifdef __cplusplus
 extern "C" {
