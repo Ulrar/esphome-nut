@@ -18,6 +18,7 @@ struct ReportFieldMapping {
   uint8_t bit_size;
   bool is_signed;
   int8_t exponent;
+  uint32_t unit;
   UpsSignal signal;
 };
 

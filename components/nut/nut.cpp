@@ -345,6 +345,7 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
     uint32_t report_count{0};
     uint8_t report_id{0};
     int8_t exponent{0};
+    uint32_t unit{0};
   } globals;
   uint8_t collection_stack[8]{};
   uint8_t collection_depth = 0;
@@ -414,6 +415,8 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
         } else {
           globals.exponent = static_cast<int8_t>(svalue);
         }
+      } else if (item_tag == 0x6) {
+        globals.unit = value;
       }
       continue;
     }
@@ -502,12 +505,14 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
           static_cast<uint8_t>(bits),
           globals.logical_min < 0,
           globals.exponent,
+          globals.unit,
           signal,
       };
       ESP_LOGD(TAG,
-               "Mapped usage %04X/%04X -> signal=%u report(type=%u id=0x%02X off=%u bits=%u exp=%d mask=0x%02X)",
+               "Mapped usage %04X/%04X -> signal=%u report(type=%u id=0x%02X off=%u bits=%u exp=%d unit=%08X mask=0x%02X)",
                usage_page, usage, static_cast<unsigned>(signal), report_type, globals.report_id, offset,
-               static_cast<unsigned>(bits), static_cast<int>(globals.exponent), collection_mask);
+               static_cast<unsigned>(bits), static_cast<int>(globals.exponent), static_cast<unsigned>(globals.unit),
+               collection_mask);
       if (signal == UpsSignal::AC_PRESENT) {
         this->has_ac_present_field_ = true;
       }
@@ -670,7 +675,13 @@ void Nut::apply_report_data_(uint8_t report_type, uint8_t report_id, const uint8
     if (field.is_signed && field.bit_size < 64 && ((raw >> (field.bit_size - 1)) & 1u)) {
       signed_raw |= (~0ULL << field.bit_size);
     }
-    float value = apply_exponent_(static_cast<float>(field.is_signed ? signed_raw : raw), field.exponent);
+    int8_t effective_exponent = field.exponent;
+    if ((field.signal == UpsSignal::INPUT_VOLTAGE || field.signal == UpsSignal::OUTPUT_VOLTAGE) && field.unit != 0) {
+      // HID power-voltage units encode an additional base-10 scale in unit metadata.
+      // NUT effectively normalizes by subtracting that built-in factor.
+      effective_exponent = static_cast<int8_t>(effective_exponent - 7);
+    }
+    float value = apply_exponent_(static_cast<float>(field.is_signed ? signed_raw : raw), effective_exponent);
     if (field.signal == UpsSignal::AC_PRESENT) {
       this->driver_.set_ac_present(value > 0.5f);
     } else {
