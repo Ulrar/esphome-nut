@@ -364,7 +364,7 @@ bool Nut::get_string_descriptor_(usb_host_client_handle_t client, usb_device_han
     return false;
   }
   const uint8_t total = raw[0];
-  if (total < 2 || total > sizeof(raw)) {
+  if (total < 2) {
     return false;
   }
   if (!this->get_descriptor_(client, device, 0x03, index, 0x0409, raw, total, &actual) || actual < 2) {
