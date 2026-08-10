@@ -7,7 +7,6 @@ DEPENDENCIES = ["network"]
 CONF_UPS_NAME = "ups_name"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
-CONF_DESCRIPTION = "description"
 CONF_PORT = "port"
 
 nut_ns = cg.esphome_ns.namespace("nut")
@@ -19,7 +18,6 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_UPS_NAME): cv.validate_id_name,
         cv.Required(CONF_USERNAME): cv.string_strict,
         cv.Required(CONF_PASSWORD): cv.string_strict,
-        cv.Optional(CONF_DESCRIPTION, default="USB HID UPS"): cv.string_strict,
         cv.Optional(CONF_PORT, default=3493): cv.port,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -31,5 +29,4 @@ async def to_code(config):
     cg.add(var.set_ups_name(config[CONF_UPS_NAME]))
     cg.add(var.set_username(config[CONF_USERNAME]))
     cg.add(var.set_password(config[CONF_PASSWORD]))
-    cg.add(var.set_description(config[CONF_DESCRIPTION]))
     cg.add(var.set_port(config[CONF_PORT]))

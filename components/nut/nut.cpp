@@ -89,7 +89,7 @@ void Nut::setup() {
 void Nut::dump_config() {
   ESP_LOGCONFIG(TAG, "NUT:");
   ESP_LOGCONFIG(TAG, "  UPS name: %s", this->ups_name_.c_str());
-  ESP_LOGCONFIG(TAG, "  Description: %s", this->description_.c_str());
+  ESP_LOGCONFIG(TAG, "  Device: %s %s", this->device_mfr_.c_str(), this->device_model_.c_str());
   ESP_LOGCONFIG(TAG, "  NUT TCP port: %u", this->port_);
   ESP_LOGCONFIG(TAG, "  USB host: %s", this->usb_host_started_ ? "started" : "not started");
 }
@@ -216,6 +216,24 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
 
   ESP_LOGI(TAG, "USB device %u: VID=%04X PID=%04X configurations=%u", device_address, descriptor->idVendor,
            descriptor->idProduct, descriptor->bNumConfigurations);
+
+  // Device identity from USB string descriptors (like upstream's
+  // format_mfr/format_serial; model adds iModel from HID later).
+  {
+    char text[64];
+    if (descriptor->iManufacturer != 0 &&
+        this->get_string_descriptor_(client, device, descriptor->iManufacturer, text, sizeof(text))) {
+      this->device_mfr_ = text;
+    }
+    if (descriptor->iProduct != 0 &&
+        this->get_string_descriptor_(client, device, descriptor->iProduct, text, sizeof(text))) {
+      this->device_model_ = text;
+    }
+    if (descriptor->iSerialNumber != 0 &&
+        this->get_string_descriptor_(client, device, descriptor->iSerialNumber, text, sizeof(text))) {
+      this->device_serial_ = text;
+    }
+  }
 
   // Fetch the configuration descriptor with a manual control transfer;
   // usb_host_get_active_config_descriptor() hangs on this device.
@@ -460,6 +478,7 @@ void Nut::resolve_hid_paths_() {
   } STRING_VARS[] = {
       {"ups.firmware", "UPS.PowerSummary.iVersion"},
       {"battery.type", "UPS.PowerSummary.iDeviceChemistry"},
+      {"ups.model", "UPS.PowerSummary.iModel"},
   };
   for (const auto &entry : STRING_VARS) {
     HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
@@ -588,6 +607,12 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
           if (this->get_string_descriptor_(client, device, static_cast<uint8_t>(logical), text, sizeof(text))) {
             strlcpy(var.text, text, sizeof(var.text));
             var.valid = true;
+            // Upstream mge-hid builds the model as "<iProduct> <iModel>".
+            if (strcmp(var.name, "ups.model") == 0 && text[0] != '\0' &&
+                this->device_model_.find(text) == std::string::npos) {
+              this->device_model_ += " ";
+              this->device_model_ += text;
+            }
           }
         }
         continue;
@@ -776,9 +801,15 @@ std::string Nut::ups_status_() const {
 
 void Nut::get_var_value_(int client_fd, const std::string &variable) const {
   if (variable == "device.mfr") {
-    this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.mfr \"Eaton\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.mfr \"" + this->device_mfr_ + "\"");
   } else if (variable == "device.model") {
-    this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.model \"5PX 1500i RT2U G2\"");
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.model \"" + this->device_model_ + "\"");
+  } else if (variable == "device.serial") {
+    if (this->device_serial_.empty()) {
+      this->send_line_(client_fd, "ERR VAR-NOT-SUPPORTED");
+      return;
+    }
+    this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.serial \"" + this->device_serial_ + "\"");
   } else if (variable == "device.type") {
     this->send_line_(client_fd, "VAR " + this->ups_name_ + " device.type \"ups\"");
   } else if (variable == "driver.name") {
@@ -905,12 +936,13 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     this->send_line_(client_fd, "END");
   } else if (line == "LIST UPS") {
     this->send_line_(client_fd, "BEGIN LIST UPS");
-    this->send_line_(client_fd, "UPS " + this->ups_name_ + " \"" + this->description_ + "\"");
+    this->send_line_(client_fd, "UPS " + this->ups_name_ + " \"" + this->device_model_ + "\"");
     this->send_line_(client_fd, "END LIST UPS");
   } else if (line == "LIST VAR " + this->ups_name_) {
     this->send_line_(client_fd, "BEGIN LIST VAR " + this->ups_name_);
     this->get_var_value_(client_fd, "device.mfr");
     this->get_var_value_(client_fd, "device.model");
+    this->get_var_value_(client_fd, "device.serial");
     this->get_var_value_(client_fd, "device.type");
     this->get_var_value_(client_fd, "driver.name");
     this->get_var_value_(client_fd, "ups.status");

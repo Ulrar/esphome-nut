@@ -53,7 +53,6 @@ nut:
   ups_name: eaton
   username: !secret nut_username
   password: !secret nut_password
-  description: Eaton 5PX 1500i RT2U G2
 ```
 
 `initial` is the development branch. For repeatable builds, pin a commit SHA.

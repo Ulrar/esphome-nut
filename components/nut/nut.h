@@ -53,7 +53,6 @@ class Nut : public Component {
   void set_ups_name(const std::string &ups_name) { this->ups_name_ = ups_name; }
   void set_username(const std::string &username) { this->username_ = username; }
   void set_password(const std::string &password) { this->password_ = password; }
-  void set_description(const std::string &description) { this->description_ = description; }
   void set_port(uint16_t port) { this->port_ = port; }
 
   void setup() override;
@@ -96,7 +95,9 @@ class Nut : public Component {
   std::string ups_name_;
   std::string username_;
   std::string password_;
-  std::string description_;
+  std::string device_mfr_{"Eaton"};
+  std::string device_model_{"UPS"};
+  std::string device_serial_;
   uint16_t port_{3493};
   volatile bool usb_host_started_{false};
   volatile bool usb_events_ready_{false};
