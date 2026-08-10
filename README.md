@@ -59,6 +59,9 @@ upsc eaton@ESP_IP
 The server does not use TLS. Restrict TCP/3493 to a trusted LAN or VLAN and
 use a unique long password.
 
+The example config also includes ESPHome debug heap sensors (`free` and max
+allocatable block) to watch RAM headroom while enabling additional mappings.
+
 ## Design
 
 The project uses the ESP32 NUT proof of concept by

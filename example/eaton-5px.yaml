@@ -25,6 +25,17 @@ ota:
 logger:
   hardware_uart: UART0
 
+debug:
+
+sensor:
+  - platform: debug
+    free:
+      name: ESP Free Heap
+    block:
+      name: ESP Max Heap Block
+    loop_time:
+      name: ESP Loop Time
+
 external_components:
   - source:
       type: local
