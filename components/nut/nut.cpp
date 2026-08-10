@@ -617,6 +617,21 @@ void Nut::resolve_hid_paths_() {
       {"beeper.disable", "UPS.BatterySystem.Battery.AudibleAlarmControl", 1},
       {"beeper.enable", "UPS.PowerSummary.AudibleAlarmControl", 2},
       {"beeper.enable", "UPS.BatterySystem.Battery.AudibleAlarmControl", 2},
+      {"beeper.disable", "UPS.AudibleAlarmControl", 1},
+      {"beeper.enable", "UPS.AudibleAlarmControl", 2},
+      // Outlet group switching (paths only exist on multi-outlet units).
+      {"outlet.1.load.off", "UPS.OutletSystem.Outlet.[2].DelayBeforeShutdown", 0},
+      {"outlet.1.load.on", "UPS.OutletSystem.Outlet.[2].DelayBeforeStartup", 0},
+      {"outlet.2.load.off", "UPS.OutletSystem.Outlet.[3].DelayBeforeShutdown", 0},
+      {"outlet.2.load.on", "UPS.OutletSystem.Outlet.[3].DelayBeforeStartup", 0},
+      {"outlet.3.load.off", "UPS.OutletSystem.Outlet.[4].DelayBeforeShutdown", 0},
+      {"outlet.3.load.on", "UPS.OutletSystem.Outlet.[4].DelayBeforeStartup", 0},
+      {"bypass.start", "UPS.PowerConverter.Input.[2].SwitchOnControl", 1},
+      {"bypass.stop", "UPS.PowerConverter.Input.[2].SwitchOffControl", 1},
+      {"experimental.ecomode.start", "UPS.PowerConverter.Input.[5].Switchable", 1},
+      {"experimental.ecomode.stop", "UPS.PowerConverter.Input.[5].Switchable", 0},
+      {"experimental.essmode.start", "UPS.PowerConverter.Input.[5].Switchable", 2},
+      {"experimental.essmode.stop", "UPS.PowerConverter.Input.[5].Switchable", 0},
   };
   for (const auto &entry : COMMANDS) {
     HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
