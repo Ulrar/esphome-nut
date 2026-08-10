@@ -1150,6 +1150,54 @@ bool Nut::is_ups_name_(const std::string &name) const {
   return name == this->ups_name_;
 }
 
+const char *Nut::command_description_(const std::string &name) const {
+  bool supported = false;
+  for (const auto &cmd : this->commands_) {
+    if (name == cmd.name) {
+      supported = true;
+      break;
+    }
+  }
+  if (!supported) {
+    return nullptr;
+  }
+  static const struct {
+    const char *name;
+    const char *desc;
+  } DESCRIPTIONS[] = {
+      {"test.battery.start.quick", "Start a quick battery test"},
+      {"test.battery.start.deep", "Start a deep battery test"},
+      {"test.battery.stop", "Stop the battery test"},
+      {"load.off.delay", "Turn off the load possibly after a delay"},
+      {"load.on.delay", "Turn on the load possibly after a delay"},
+      {"shutdown.stop", "Stop a shutdown in progress"},
+      {"shutdown.reboot", "Shut down the load briefly while rebooting the UPS"},
+      {"beeper.off", "Disable the UPS beeper"},
+      {"beeper.on", "Enable the UPS beeper"},
+      {"beeper.mute", "Temporarily mute the UPS beeper"},
+      {"beeper.disable", "Disable the UPS beeper"},
+      {"beeper.enable", "Enable the UPS beeper"},
+      {"outlet.1.load.off", "Turn off outlet 1 immediately"},
+      {"outlet.1.load.on", "Turn on outlet 1 immediately"},
+      {"outlet.2.load.off", "Turn off outlet 2 immediately"},
+      {"outlet.2.load.on", "Turn on outlet 2 immediately"},
+      {"outlet.3.load.off", "Turn off outlet 3 immediately"},
+      {"outlet.3.load.on", "Turn on outlet 3 immediately"},
+      {"bypass.start", "Put the UPS in bypass mode"},
+      {"bypass.stop", "Take the UPS out of bypass mode"},
+      {"experimental.ecomode.start", "Start ECO mode"},
+      {"experimental.ecomode.stop", "Stop ECO mode"},
+      {"experimental.essmode.start", "Start ESS mode"},
+      {"experimental.essmode.stop", "Stop ESS mode"},
+  };
+  for (const auto &entry : DESCRIPTIONS) {
+    if (name == entry.name) {
+      return entry.desc;
+    }
+  }
+  return "Unavailable";
+}
+
 void Nut::send_line_(int client_fd, const std::string &line) const {
   ESP_LOGD(TAG, "NUT fd=%d >> %s", client_fd, line.c_str());
   const std::string message = line + "\n";
@@ -1209,12 +1257,23 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
     }
     this->send_line_(client_fd, "END LIST VAR " + this->ups_name_);
   } else if (command == "GET") {
-    const std::string expected_prefix = "VAR " + this->ups_name_ + " ";
-    if (arguments.rfind(expected_prefix, 0) != 0) {
-      this->send_line_(client_fd, "ERR VAR-NOT-SUPPORTED");
+    const std::string var_prefix = "VAR " + this->ups_name_ + " ";
+    if (arguments.rfind(var_prefix, 0) == 0) {
+      this->get_var_value_(client_fd, arguments.substr(var_prefix.size()));
       return;
     }
-    this->get_var_value_(client_fd, arguments.substr(expected_prefix.size()));
+    const std::string cmddesc_prefix = "CMDDESC " + this->ups_name_ + " ";
+    if (arguments.rfind(cmddesc_prefix, 0) == 0) {
+      const std::string name = arguments.substr(cmddesc_prefix.size());
+      const char *desc = command_description_(name);
+      if (desc == nullptr) {
+        this->send_line_(client_fd, "ERR CMD-NOT-SUPPORTED");
+        return;
+      }
+      this->send_line_(client_fd, "CMDDESC " + this->ups_name_ + " " + name + " \"" + desc + "\"");
+      return;
+    }
+    this->send_line_(client_fd, "ERR VAR-NOT-SUPPORTED");
   } else if (line == "LIST CMD " + this->ups_name_) {
     this->send_line_(client_fd, "BEGIN LIST CMD " + this->ups_name_);
     for (const auto &cmd : this->commands_) {

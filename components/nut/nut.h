@@ -71,6 +71,7 @@ class Nut : public Component {
   void start_usb_host_();
   void discover_usb_devices_(usb_host_client_handle_t client);
   void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated);
+  const char *command_description_(const std::string &name) const;
   bool is_ups_name_(const std::string &name) const;
   void send_line_(int client_fd, const std::string &line) const;
   void log_usb_device_(usb_host_client_handle_t client, uint8_t device_address);
