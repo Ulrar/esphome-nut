@@ -236,6 +236,16 @@ void Nut::log_usb_device_(usb_host_client_handle_t client, uint8_t device_addres
   }
   const uint8_t *config_data = config_buffer;
   const uint16_t config_length = static_cast<uint16_t>(std::min<size_t>(config_actual, sizeof(config_buffer)));
+  ESP_LOGI(TAG, "Configuration descriptor: %u bytes", config_length);
+  for (uint16_t off = 0; off + 2 <= config_length;) {
+    const uint8_t dlen = config_data[off];
+    const uint8_t dtype = config_data[off + 1];
+    if (dlen < 2 || off + dlen > config_length) {
+      break;
+    }
+    ESP_LOGD(TAG, "  desc off=%u len=%u type=0x%02X", off, dlen, dtype);
+    off += dlen;
+  }
 
   uint8_t hid_interface = 0;
   uint16_t report_length = 0;
