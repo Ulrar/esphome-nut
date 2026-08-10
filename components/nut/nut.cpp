@@ -546,6 +546,9 @@ void Nut::resolve_hid_paths_() {
       {"battery.charger.abm.status", "UPS.BatterySystem.Charger.ABMEnable", 5},
       {"battery.charger.mode.status", "UPS.BatterySystem.Charger.Mode", 5},
       {"battery.charger.type.status", "UPS.BatterySystem.Charger.Status", 5},
+      {"ups.beeper.status", "UPS.BatterySystem.Battery.AudibleAlarmControl", 6},
+      {"ups.beeper.status", "UPS.PowerSummary.AudibleAlarmControl", 6},
+      {"ups.beeper.status", "UPS.AudibleAlarmControl", 6},
   };
   for (const auto &entry : ENUM_VARS) {
     HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
@@ -708,6 +711,15 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
       long logical = 0;
       GetValue(payload, var.item, &logical);
       if (var.is_string) {
+        if (var.convert == 6) {
+          // beeper_info lookup (usbhid-ups.c).
+          static const char *const BEEPER_STATES[] = {nullptr, "disabled", "enabled", "muted"};
+          if (logical >= 1 && logical <= 3) {
+            strlcpy(var.text, BEEPER_STATES[logical], sizeof(var.text));
+            var.valid = true;
+          }
+          continue;
+        }
         if (var.convert == 5) {
           // Internal ABM input: stash the number, publish nothing.
           var.value = logical;
