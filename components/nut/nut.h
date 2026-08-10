@@ -17,10 +17,12 @@ namespace nut {
 struct ResolvedVar {
   const char *name;    // NUT variable name, e.g. "input.voltage"
   const char *format;  // printf format from the mge-hid table
-  int convert;         // 0=plain, 1=Kelvin->Celsius, 2=As->Ah
+  int convert;         // 0=plain, 1=Kelvin->Celsius, 2=As->Ah, 3=string index
   HIDData_t *item;     // resolved descriptor item
   double value{0};
+  char text[32]{};
   bool valid{false};
+  bool is_string{false};
 };
 
 // A BOOL status path resolved against the descriptor.
@@ -72,6 +74,8 @@ class Nut : public Component {
                            size_t *buffer_length);
   bool get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t type, uint8_t index,
                        uint16_t windex, uint8_t *buffer, uint16_t length, size_t *actual);
+  bool get_string_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t index,
+                              char *buffer, size_t buffer_length);
   const ResolvedVar *find_var_(const char *name) const;
   void get_var_value_(int client_fd, const std::string &variable) const;
   std::string ups_status_() const;

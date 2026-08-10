@@ -306,8 +306,8 @@ bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t d
 
   TransferContext context{false};
   usb_setup_packet_t setup{};
-  setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_STANDARD |
-                        USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+  const uint8_t recipient = type == 0x03 ? USB_BM_REQUEST_TYPE_RECIP_DEVICE : USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+  setup.bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_STANDARD | recipient;
   setup.bRequest = USB_B_REQUEST_GET_DESCRIPTOR;
   setup.wValue = static_cast<uint16_t>((type << 8) | index);
   setup.wIndex = windex;
@@ -351,6 +351,36 @@ bool Nut::get_descriptor_(usb_host_client_handle_t client, usb_device_handle_t d
   return true;
 }
 
+bool Nut::get_string_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device, uint8_t index,
+                                 char *buffer, size_t buffer_length) {
+  // USB string descriptors: device-level GET_DESCRIPTOR, wIndex=LANGID.
+  // Use English (0x0409) like upstream; fall back to whatever we get.
+  uint8_t raw[255];
+  size_t actual = 0;
+  // First request just the header to learn the real length.
+  if (!this->get_descriptor_(client, device, 0x03, index, 0x0409, raw, 4, &actual) || actual < 2) {
+    return false;
+  }
+  const uint8_t total = raw[0];
+  if (total < 2 || total > sizeof(raw)) {
+    return false;
+  }
+  if (!this->get_descriptor_(client, device, 0x03, index, 0x0409, raw, total, &actual) || actual < 2) {
+    return false;
+  }
+  // UTF-16LE -> ASCII, drop the header.
+  size_t out = 0;
+  for (size_t i = 2; i + 1 < actual && out + 1 < buffer_length; i += 2) {
+    const uint16_t ch = static_cast<uint16_t>(raw[i]) | (static_cast<uint16_t>(raw[i + 1]) << 8);
+    if (ch == 0) {
+      break;
+    }
+    buffer[out++] = ch < 128 ? static_cast<char>(ch) : '?';
+  }
+  buffer[out] = '\0';
+  return out > 0;
+}
+
 bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_device_handle_t device,
                                          uint8_t interface_number, uint16_t report_length) {
   auto *descriptor_copy = static_cast<uint8_t *>(malloc(report_length));
@@ -392,6 +422,19 @@ void Nut::resolve_hid_paths_() {
   this->bools_.clear();
   this->report_requests_.clear();
 
+  // Debug dump of the full HID tree, like upstream HIDDumpTree().
+  {
+    char path[160];
+    for (size_t i = 0; i < this->hid_desc_->nitems; i++) {
+      const HIDData_t *item = &this->hid_desc_->item[i];
+      if (path_to_string(path, sizeof(path), &item->Path, nullptr) > 0) {
+        ESP_LOGD(TAG, "Path: %s, Type: %s, ReportID: 0x%02X, Offset: %u, Size: %u", path,
+                 item->Type == ITEM_FEATURE ? "Feature" : item->Type == ITEM_INPUT ? "Input" : "Output",
+                 item->ReportID, item->Offset, item->Size);
+      }
+    }
+  }
+
   // NUT variables: walk the mge-hid table in order, first path that
   // resolves wins, exactly like upsdrv_initinfo() in usbhid-ups.
   for (size_t i = 0; i < MGE_READ_MAP_COUNT; i++) {
@@ -412,6 +455,29 @@ void Nut::resolve_hid_paths_() {
     }
     this->vars_.push_back({entry.nut_var, entry.format, entry.convert, item, 0.0, false});
     ESP_LOGD(TAG, "Mapped %s -> %s (report 0x%02X)", entry.nut_var, entry.hid_path, item->ReportID);
+  }
+
+  // String-index vars (stringid_conversion in upstream): the HID value
+  // is a USB string descriptor index.
+  static const struct {
+    const char *nut_var;
+    const char *hid_path;
+  } STRING_VARS[] = {
+      {"ups.firmware", "UPS.PowerSummary.iVersion"},
+      {"battery.type", "UPS.PowerSummary.iDeviceChemistry"},
+  };
+  for (const auto &entry : STRING_VARS) {
+    HIDData_t *item = nut_hid_find_object(this->hid_desc_, entry.hid_path);
+    if (item == nullptr) {
+      continue;
+    }
+    ResolvedVar var{};
+    var.name = entry.nut_var;
+    var.convert = 3;
+    var.item = item;
+    var.is_string = true;
+    this->vars_.push_back(var);
+    ESP_LOGD(TAG, "Mapped string %s -> %s (report 0x%02X)", entry.nut_var, entry.hid_path, item->ReportID);
   }
 
   for (size_t i = 0; i < MGE_BOOL_MAP_COUNT; i++) {
@@ -478,6 +544,16 @@ void Nut::poll_hid_reports_(usb_host_client_handle_t client, usb_device_handle_t
       }
       long logical = 0;
       GetValue(payload, var.item, &logical);
+      if (var.is_string) {
+        if (logical > 0 && logical < 255) {
+          char text[sizeof(var.text)];
+          if (this->get_string_descriptor_(client, device, static_cast<uint8_t>(logical), text, sizeof(text))) {
+            strlcpy(var.text, text, sizeof(var.text));
+            var.valid = true;
+          }
+        }
+        continue;
+      }
       double value = nut_hid_scale_value(var.item, logical);
       if (var.convert == 1) {
         value -= 273.15;  // kelvin_celsius_conversion
@@ -600,6 +676,10 @@ void Nut::get_var_value_(int client_fd, const std::string &variable) const {
     const ResolvedVar *var = this->find_var_(variable.c_str());
     if (var == nullptr) {
       this->send_line_(client_fd, "ERR VAR-NOT-SUPPORTED");
+      return;
+    }
+    if (var->is_string) {
+      this->send_line_(client_fd, "VAR " + this->ups_name_ + " " + variable + " \"" + var->text + "\"");
       return;
     }
     char value_text[32];
