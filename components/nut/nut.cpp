@@ -325,7 +325,7 @@ bool Nut::capture_hid_report_descriptor_(usb_host_client_handle_t client, usb_de
     Free_ReportDesc(this->hid_desc_);
     this->hid_desc_ = nullptr;
   }
-  this->hid_desc_ = Parse_ReportDesc(report, actual_length);
+  this->hid_desc_ = Parse_ReportDesc(const_cast<uint8_t *>(report), actual_length);
   usb_host_transfer_free(transfer);
 
   if (this->hid_desc_ == nullptr) {
