@@ -25,7 +25,6 @@ class Eaton5pxDriver : public UpsDriver {
       if ((collection_mask & COLLECTION_OUTPUT) != 0) {
         return UpsSignal::OUTPUT_VOLTAGE;
       }
-      return UpsSignal::OUTPUT_VOLTAGE;
     }
     if (usage_page == 0x84 && usage == 0x35) {
       return UpsSignal::LOAD_PERCENT;

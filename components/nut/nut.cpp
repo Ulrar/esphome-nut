@@ -488,10 +488,7 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       if (usage_value > 0xFFFF) {
         usage_page = static_cast<uint16_t>((usage_value >> 16) & 0xFFFF);
       }
-      UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
-      if (signal == UpsSignal::NONE) {
-        signal = this->driver_.classify_field(usage_page, usage, 0);
-      }
+      const UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
       const uint16_t offset = bit_offsets[report_type][globals.report_id];
       bit_offsets[report_type][globals.report_id] += bits;
       const bool ignore_constant = is_constant && report_type == HID_REPORT_TYPE_INPUT;
