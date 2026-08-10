@@ -82,6 +82,8 @@ class Nut : public Component {
   uint8_t report_request_count_{0};
   ReportFieldMapping report_fields_[48]{};
   ReportRequest report_requests_[16]{};
+  ReportFieldMapping parse_selected_fields_[48]{};
+  uint16_t parse_bit_offsets_[4][256]{};
   Eaton5pxDriver driver_;
 };
 

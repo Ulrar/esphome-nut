@@ -111,9 +111,9 @@ void Nut::dump_config() {
 
 void Nut::start_usb_host_() {
   BaseType_t daemon_created = xTaskCreate(
-      usb_daemon_task_, "eaton_usb", 4096, this, 5, nullptr);
+      usb_daemon_task_, "eaton_usb", 6144, this, 5, nullptr);
   BaseType_t client_created = xTaskCreate(
-      usb_client_task_, "eaton_usb_client", 4096, this, 5, nullptr);
+      usb_client_task_, "eaton_usb_client", 12288, this, 5, nullptr);
 
   if (daemon_created != pdPASS || client_created != pdPASS) {
     ESP_LOGE(TAG, "Unable to start USB host tasks");
@@ -380,7 +380,7 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
   uint32_t local_usage_min = 0;
   uint32_t local_usage_max = 0;
   bool has_usage_range = false;
-  uint16_t bit_offsets[4][256]{};
+  memset(this->parse_bit_offsets_, 0, sizeof(this->parse_bit_offsets_));
 
   auto reset_local = [&]() {
     local_usage_count = 0;
@@ -518,8 +518,8 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
         usage_page = static_cast<uint16_t>((usage_value >> 16) & 0xFFFF);
       }
       const UpsSignal signal = this->driver_.classify_field(usage_page, usage, collection_mask);
-      const uint16_t offset = bit_offsets[report_type][globals.report_id];
-      bit_offsets[report_type][globals.report_id] += bits;
+      const uint16_t offset = this->parse_bit_offsets_[report_type][globals.report_id];
+      this->parse_bit_offsets_[report_type][globals.report_id] += bits;
       const bool ignore_constant = is_constant && report_type == HID_REPORT_TYPE_INPUT;
       if (ignore_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
         continue;
@@ -571,7 +571,6 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
   }
 
   if (this->report_field_count_ > 0) {
-    ReportFieldMapping selected[48]{};
     uint8_t selected_count = 0;
     constexpr uint8_t signal_limit = static_cast<uint8_t>(UpsSignal::DISCHARGING) + 1;
     int16_t best_index_for_signal[signal_limit];
@@ -609,12 +608,12 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       if (chosen < 0) {
         continue;
       }
-      selected[selected_count++] = this->report_fields_[chosen];
+      this->parse_selected_fields_[selected_count++] = this->report_fields_[chosen];
     }
 
     this->report_field_count_ = selected_count;
     for (uint8_t i = 0; i < selected_count; i++) {
-      this->report_fields_[i] = selected[i];
+      this->report_fields_[i] = this->parse_selected_fields_[i];
     }
   }
 
