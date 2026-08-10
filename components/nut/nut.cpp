@@ -494,7 +494,8 @@ bool Nut::parse_hid_report_descriptor_(const uint8_t *descriptor, size_t descrip
       }
       const uint16_t offset = bit_offsets[report_type][globals.report_id];
       bit_offsets[report_type][globals.report_id] += bits;
-      if (is_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
+      const bool ignore_constant = is_constant && report_type == HID_REPORT_TYPE_INPUT;
+      if (ignore_constant || signal == UpsSignal::NONE || bits == 0 || this->report_field_count_ >= 48 || bits > 32) {
         continue;
       }
       this->report_fields_[this->report_field_count_++] = {
