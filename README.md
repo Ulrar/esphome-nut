@@ -53,9 +53,17 @@ nut:
   ups_name: eaton
   username: !secret nut_username
   password: !secret nut_password
+  # Optional credentials for the one upsmon primary allowed to issue FSD.
+  # primary_username: !secret nut_primary_username
+  # primary_password: !secret nut_primary_password
 ```
 
 `main` tracks the latest state. For repeatable builds, pin a commit SHA.
+
+The optional primary credentials authorize the NUT `FSD <ups>` command. The
+server merges a primary-requested FSD with the UPS HID `ShutdownImminent` flag
+and keeps a requested FSD set until the UPS reports that mains power has
+returned. Do not give these credentials to secondary clients.
 
 The server speaks plain-text NUT without TLS: restrict TCP/3493 to a trusted
 LAN/VLAN and use a unique long password.
@@ -89,8 +97,9 @@ here so they can be upstreamed or reworked:
   this board is itself powered from that outlet and dies at "off". It is
   listed so Home Assistant discovers its per-outlet restart button.
 - **NUT protocol** is a subset: `LIST UPS/VAR/CMD`, `GET VAR/CMDDESC`,
-  `INSTCMD`, `USERNAME/PASSWORD/LOGIN/LOGOUT`, `VER/PING`, plus a
-  non-standard `DUMPDESC` debug command. No TLS, no `SET`, no tracking.
+  `INSTCMD`, primary-authorized `FSD`, `USERNAME/PASSWORD/LOGIN/LOGOUT`,
+  `VER/PING`, plus a non-standard `DUMPDESC` debug command. No TLS, no `SET`,
+  no tracking.
 - The device handle is kept open after claiming and all control transfers
   are completed via timeout + semaphore; upstream can freely open/close.
 

@@ -55,6 +55,8 @@ class Nut : public Component {
   void set_ups_name(const std::string &ups_name) { this->ups_name_ = ups_name; }
   void set_username(const std::string &username) { this->username_ = username; }
   void set_password(const std::string &password) { this->password_ = password; }
+  void set_primary_username(const std::string &username) { this->primary_username_ = username; }
+  void set_primary_password(const std::string &password) { this->primary_password_ = password; }
   void set_port(uint16_t port) { this->port_ = port; }
 
   void setup() override;
@@ -70,7 +72,8 @@ class Nut : public Component {
 
   void start_usb_host_();
   void discover_usb_devices_(usb_host_client_handle_t client);
-  void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated);
+  void handle_nut_command_(int client_fd, const std::string &line, bool *authenticated,
+                           bool *primary_authenticated, std::string *pending_username);
   const char *command_description_(const std::string &name) const;
   bool is_ups_name_(const std::string &name) const;
   void send_line_(int client_fd, const std::string &line) const;
@@ -99,6 +102,9 @@ class Nut : public Component {
   std::string ups_name_;
   std::string username_;
   std::string password_;
+  std::string primary_username_;
+  std::string primary_password_;
+  mutable bool fsd_latched_{false};
   std::string device_mfr_{"Eaton"};
   std::string device_model_{"UPS"};
   std::string device_serial_;
