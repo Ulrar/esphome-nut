@@ -37,6 +37,7 @@ namespace nut {
 
 static const char *const TAG = "nut";
 static constexpr size_t NUT_LINE_LENGTH = 256;
+static constexpr int NUT_MAX_CLIENTS = 8;
 static constexpr uint8_t USB_HID_DESCRIPTOR_TYPE = 0x21;
 static constexpr uint8_t USB_HID_REPORT_DESCRIPTOR_TYPE = 0x22;
 static constexpr uint16_t MAX_HID_REPORT_DESCRIPTOR_LENGTH = REPORT_DSC_SIZE;
@@ -1139,7 +1140,7 @@ void Nut::nut_server_task_(void *argument) {
   address.sin_port = htons(component->port_);
   address.sin_addr.s_addr = htonl(INADDR_ANY);
   if (bind(server_fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
-      listen(server_fd, 4) != 0) {
+      listen(server_fd, NUT_MAX_CLIENTS) != 0) {
     ESP_LOGE(TAG, "Cannot listen on NUT port %u", component->port_);
     close(server_fd);
     vTaskDelete(nullptr);
@@ -1158,7 +1159,7 @@ void Nut::nut_server_task_(void *argument) {
     std::string username;
     std::string pending;
   };
-  ClientState clients[4];
+  ClientState clients[NUT_MAX_CLIENTS];
   std::array<char, NUT_LINE_LENGTH> buffer{};
 
   while (true) {
