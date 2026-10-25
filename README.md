@@ -62,6 +62,7 @@ LAN/VLAN and use a unique long password.
 
 ## Known limitations
 
+- The NUT server supports up to 8 simultaneous client connections.
 - Instant commands are executed without interlock checks — `load.off.delay`,
   `shutdown.*` and the `outlet.N.load.*` commands really do power down the
   load, and there is no tracking (`OK TRACKING`) support.
