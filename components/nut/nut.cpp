@@ -94,6 +94,8 @@ void Nut::dump_config() {
   ESP_LOGCONFIG(TAG, "  UPS name: %s", this->ups_name_.c_str());
   ESP_LOGCONFIG(TAG, "  Device: %s %s", this->device_mfr_.c_str(), this->device_model_.c_str());
   ESP_LOGCONFIG(TAG, "  NUT TCP port: %u", this->port_);
+  ESP_LOGCONFIG(TAG, "  FSD primary authentication: %s",
+                this->primary_username_.empty() ? "disabled" : "enabled");
   ESP_LOGCONFIG(TAG, "  USB host: %s", this->usb_host_started_ ? "started" : "not started");
 }
 
@@ -1047,7 +1049,11 @@ const ResolvedVar *Nut::charger_status_var_() const {
 
 std::string Nut::ups_status_() const {
   std::string status;
+  bool on_line = false;
   for (const auto &entry : this->bools_) {
+    if (entry.valid && entry.status_set != nullptr && strcmp(entry.status_set, "OL") == 0) {
+      on_line = true;
+    }
     const char *token = entry.valid ? entry.status_set : entry.status_clear;
     if (token == nullptr) {
       continue;
@@ -1061,6 +1067,19 @@ std::string Nut::ups_status_() const {
     }
     status += token;
   }
+
+  // A primary's FSD is latched until the UPS reports that mains power has
+  // returned. The HID ShutdownImminent bit remains an independent FSD source.
+  if (on_line) {
+    this->fsd_latched_ = false;
+  }
+  if (this->fsd_latched_ && status.find("FSD") == std::string::npos) {
+    if (!status.empty()) {
+      status += ' ';
+    }
+    status += "FSD";
+  }
+
   if (status.empty()) {
     return "WAIT";
   }
@@ -1136,6 +1155,8 @@ void Nut::nut_server_task_(void *argument) {
   struct ClientState {
     int fd{-1};
     bool authenticated{false};
+    bool primary_authenticated{false};
+    std::string username;
     std::string pending;
   };
   ClientState clients[NUT_MAX_CLIENTS];
@@ -1165,6 +1186,8 @@ void Nut::nut_server_task_(void *argument) {
           if (client.fd < 0) {
             client.fd = client_fd;
             client.authenticated = false;
+            client.primary_authenticated = false;
+            client.username.clear();
             client.pending.clear();
             accepted = true;
             ESP_LOGI(TAG, "NUT client connected (fd=%d)", client_fd);
@@ -1197,7 +1220,8 @@ void Nut::nut_server_task_(void *argument) {
         client.pending.erase(0, line_end + 1);
         if (!line.empty()) {
           ESP_LOGD(TAG, "NUT fd=%d << %s", client.fd, line.c_str());
-          component->handle_nut_command_(client.fd, line, &client.authenticated);
+          component->handle_nut_command_(client.fd, line, &client.authenticated,
+                                         &client.primary_authenticated, &client.username);
         }
       }
     }
@@ -1265,7 +1289,8 @@ void Nut::send_line_(int client_fd, const std::string &line) const {
   send(client_fd, message.c_str(), message.size(), 0);
 }
 
-void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *authenticated) {
+void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *authenticated,
+                              bool *primary_authenticated, std::string *pending_username) {
   const std::string command = first_word(line);
   const std::string arguments = after_first_word(line);
 
@@ -1274,18 +1299,38 @@ void Nut::handle_nut_command_(int client_fd, const std::string &line, bool *auth
   } else if (command == "PING") {
     this->send_line_(client_fd, "PONG");
   } else if (command == "USERNAME") {
-    *authenticated = arguments == this->username_;
-    this->send_line_(client_fd, *authenticated ? "OK" : "ERR ACCESS-DENIED");
+    *authenticated = false;
+    *primary_authenticated = false;
+    *pending_username = arguments;
+    const bool known_user = arguments == this->username_ ||
+                            (!this->primary_username_.empty() && arguments == this->primary_username_);
+    this->send_line_(client_fd, known_user ? "OK" : "ERR ACCESS-DENIED");
   } else if (command == "PASSWORD") {
-    *authenticated = *authenticated && arguments == this->password_;
-    this->send_line_(client_fd, *authenticated ? "OK" : "ERR ACCESS-DENIED");
+    *authenticated = *pending_username == this->username_ && arguments == this->password_;
+    *primary_authenticated = !this->primary_username_.empty() &&
+                             *pending_username == this->primary_username_ &&
+                             arguments == this->primary_password_;
+    *pending_username = "";
+    this->send_line_(client_fd,
+                     (*authenticated || *primary_authenticated) ? "OK" : "ERR ACCESS-DENIED");
   } else if (command == "LOGIN") {
     // Like upsd: LOGIN just registers interest in the UPS; credentials
     // only gate privileged commands (INSTCMD), not data access.
     this->send_line_(client_fd, this->is_ups_name_(arguments) ? "OK" : "ERR UNKNOWN-UPS");
   } else if (command == "LOGOUT") {
     *authenticated = false;
+    *primary_authenticated = false;
+    *pending_username = "";
     this->send_line_(client_fd, "OK Goodbye");
+  } else if (command == "FSD") {
+    if (!*primary_authenticated) {
+      this->send_line_(client_fd, "ERR ACCESS-DENIED");
+    } else if (!this->is_ups_name_(arguments)) {
+      this->send_line_(client_fd, "ERR UNKNOWN-UPS");
+    } else {
+      this->fsd_latched_ = true;
+      this->send_line_(client_fd, "OK");
+    }
   } else if (line == "DUMPDESC") {
     // Debug: stream the raw HID report descriptor as hex lines.
     char line[56];
